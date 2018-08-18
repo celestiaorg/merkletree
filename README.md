@@ -23,7 +23,7 @@ import (
     "log"
     "os"
 
-    "github.com/NebulousLabs/merkletree"
+    "gitlab.com/NebulousLabs/merkletree"
 )
 
 // All error checking is ignored in the following examples.
@@ -100,7 +100,7 @@ func main() {
 ```
 
 For more extensive documentation, refer to the
-[godoc](http://godoc.org/github.com/NebulousLabs/merkletree).
+[godoc](http://godoc.org/gitlab.com/NebulousLabs/merkletree).
 
 Notes
 -----

@@ -6,8 +6,8 @@ REBUILD:
 dependencies:
 	go get -u github.com/dvyukov/go-fuzz/go-fuzz
 	go get -u github.com/dvyukov/go-fuzz/go-fuzz-build
-	go get -u github.com/NebulousLabs/fastrand
-	go get -u github.com/NebulousLabs/errors
+	go get -u gitlab.com/NebulousLabs/fastrand
+	go get -u gitlab.com/NebulousLabs/errors
 
 install: REBUILD
 	go install
@@ -24,7 +24,7 @@ cover: REBUILD
 
 fuzz: REBUILD
 	go install -tags='debug gofuzz'
-	go-fuzz-build github.com/NebulousLabs/merkletree
+	go-fuzz-build gitlab.com/NebulousLabs/merkletree
 	go-fuzz -bin=./merkletree-fuzz.zip -workdir=fuzz
 
 .PHONY: all REBUILD dependencies install test test-short cover fuzz benchmark
