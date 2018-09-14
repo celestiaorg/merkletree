@@ -19,3 +19,9 @@
 //
 // Examples can be found in the README for the package.
 package merkletree
+
+var (
+	// prefixes used during hashing, as specified by RFC 6962
+	leafHashPrefix = []byte{0x00}
+	nodeHashPrefix = []byte{0x01}
+)

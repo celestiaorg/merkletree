@@ -61,14 +61,14 @@ func sum(h hash.Hash, data ...[]byte) []byte {
 // sums are calculated using:
 //		Hash(0x00 || data)
 func leafSum(h hash.Hash, data []byte) []byte {
-	return sum(h, []byte{0}, data)
+	return sum(h, leafHashPrefix, data)
 }
 
 // nodeSum returns the hash created from two sibling nodes being combined into
 // a parent node. Node sums are calculated using:
 //		Hash(0x01 || left sibling sum || right sibling sum)
 func nodeSum(h hash.Hash, a, b []byte) []byte {
-	return sum(h, []byte{1}, a, b)
+	return sum(h, nodeHashPrefix, a, b)
 }
 
 // joinSubTrees combines two equal sized subTrees into a larger subTree.
