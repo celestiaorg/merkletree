@@ -33,7 +33,7 @@ type precalcSubtreeHasher struct {
 	sh          SubtreeHasher
 }
 
-func (p *precalcSubtreeHasher) NextSubtreeRoot(n int) []byte {
+func (p *precalcSubtreeHasher) NextSubtreeRoot(n int) ([]byte, error) {
 	if n%p.subtreeSize == 0 && len(p.precalc) >= n/p.subtreeSize {
 		np := n / p.subtreeSize
 		p.s.Reset()
@@ -41,19 +41,18 @@ func (p *precalcSubtreeHasher) NextSubtreeRoot(n int) []byte {
 			p.s.AppendNode(root)
 		}
 		p.precalc = p.precalc[np:]
-		p.sh.Skip(n)
-		return p.s.Root()
+		return p.s.Root(), p.sh.Skip(n)
 	}
 	return p.sh.NextSubtreeRoot(n)
 }
 
-func (p *precalcSubtreeHasher) Skip(n int) {
+func (p *precalcSubtreeHasher) Skip(n int) error {
 	skippedHashes := n / p.subtreeSize
 	if n%p.subtreeSize != 0 {
 		skippedHashes++
 	}
 	p.precalc = p.precalc[skippedHashes:]
-	p.sh.Skip(n)
+	return p.sh.Skip(n)
 }
 
 func newPrecalcSubtreeHasher(precalc [][]byte, subtreeSize int, h hash.Hash, sh SubtreeHasher) *precalcSubtreeHasher {
@@ -77,12 +76,17 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	s := NewStack(blake)
 	leafHash, nodeHash := s.leafHash, s.nodeHash
 
-	proof := BuildRangeProof(0, numLeaves, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
-	if len(proof) != 0 {
+	proof, err := BuildRangeProof(0, numLeaves, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(proof) != 0 {
 		t.Error("BuildRangeProof constructed an incorrect proof for the entire sector")
 	}
 
-	proof = BuildRangeProof(0, 1, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	proof, err = BuildRangeProof(0, 1, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := leafHash(leafData[:leafSize])
 	for i := range proof {
 		root = nodeHash(root, proof[i])
@@ -93,7 +97,10 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 		t.Error("VerifyRangeProof failed to verify a known correct proof")
 	}
 
-	proof = BuildRangeProof(numLeaves-1, numLeaves, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	proof, err = BuildRangeProof(numLeaves-1, numLeaves, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
 	root = leafHash(leafData[len(leafData)-leafSize:])
 	for i := range proof {
 		root = nodeHash(proof[len(proof)-i-1], root)
@@ -104,7 +111,10 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 		t.Error("VerifyRangeProof failed to verify a known correct proof")
 	}
 
-	proof = BuildRangeProof(10, 11, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	proof, err = BuildRangeProof(10, 11, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
 	root = leafHash(leafData[10*leafSize:][:leafSize])
 	root = nodeHash(root, proof[2])
 	root = nodeHash(proof[1], root)
@@ -121,7 +131,10 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 
 	// this is the largest possible proof
 	midl, midr := numLeaves/2-1, numLeaves/2+1
-	proof = BuildRangeProof(midl, midr, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	proof, err = BuildRangeProof(midl, midr, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
 	left := leafHash(leafData[midl*leafSize:][:leafSize])
 	for i := 0; i < len(proof)/2; i++ {
 		left = nodeHash(proof[len(proof)/2-i-1], left)
@@ -141,7 +154,10 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		start := fastrand.Intn(numLeaves - 1)
 		end := start + fastrand.Intn(numLeaves-start)
-		proof := BuildRangeProof(start, end, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+		proof, err := BuildRangeProof(start, end, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, root) {
 			t.Errorf("BuildRangeProof constructed an incorrect proof for range %v-%v", start, end)
 		}
@@ -153,8 +169,11 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 		bytesRoot(leafData[len(leafData)/2:], blake, leafSize),
 	}
 	precalc := newPrecalcSubtreeHasher(precalcRoots, numLeaves/2, blake, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
-	proof = BuildRangeProof(numLeaves-1, numLeaves, precalc)
-	recalcProof := BuildRangeProof(numLeaves-1, numLeaves, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+	proof, err = BuildRangeProof(numLeaves-1, numLeaves, precalc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recalcProof, err := BuildRangeProof(numLeaves-1, numLeaves, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
 	if !reflect.DeepEqual(proof, recalcProof) {
 		t.Fatal("precalc failed")
 	}
@@ -172,6 +191,9 @@ func TestBuildVerifyReaderRangeProof(t *testing.T) {
 	for i := 0; i < 10; i++ {
 	retry:
 		leafSize := fastrand.Intn(1 << 8)
+		if leafSize == 0 {
+			goto retry
+		}
 		data := fastrand.Bytes(leafSize*4 + fastrand.Intn(1<<10))
 		numLeaves := len(data) / leafSize
 		if len(data)%leafSize != 0 {
@@ -207,7 +229,7 @@ func BenchmarkBuildRangeProof(b *testing.B) {
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				_ = BuildRangeProof(start, end, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+				_, _ = BuildRangeProof(start, end, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
 			}
 		}
 	}
@@ -238,13 +260,13 @@ func BenchmarkBuildRangeProofPrecalc(b *testing.B) {
 		return func(b *testing.B) {
 			precalc := newPrecalcSubtreeHasher(precalcRoots, precalcSize, blake, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
 			b.ReportAllocs()
-			proof := BuildRangeProof(start, end, precalc)
+			proof, _ := BuildRangeProof(start, end, precalc)
 			if !VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, root) {
 				b.Fatal("precalculated roots are incorrect")
 			}
 			for i := 0; i < b.N; i++ {
 				precalc = newPrecalcSubtreeHasher(precalcRoots, precalcSize, blake, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
-				_ = BuildRangeProof(start, end, precalc)
+				_, _ = BuildRangeProof(start, end, precalc)
 			}
 		}
 	}
@@ -263,7 +285,7 @@ func BenchmarkVerifyRangeProof(b *testing.B) {
 	root := bytesRoot(leafData, blake, leafSize)
 
 	benchRange := func(start, end int) func(*testing.B) {
-		proof := BuildRangeProof(start, end, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
+		proof, _ := BuildRangeProof(start, end, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {

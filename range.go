@@ -11,8 +11,12 @@ import (
 // A SubtreeHasher calculates subtree roots in sequential order, for use with
 // BuildRangeProof.
 type SubtreeHasher interface {
-	NextSubtreeRoot(n int) []byte
-	Skip(n int)
+	// NextSubtreeRoot returns the root of the next n leaves. If fewer than n
+	// leaves are left in the tree, NextSubtreeRoot returns the root of those
+	// leaves. If no leaves are left, NextSubtreeRoot returns io.EOF.
+	NextSubtreeRoot(n int) ([]byte, error)
+	// Skip skips the next n leaves.
+	Skip(n int) error
 }
 
 // BuildRangeProof constructs a proof for the leaf range [start, end).
@@ -20,7 +24,7 @@ type SubtreeHasher interface {
 // where j may extend beyond the size of the tree. subtreeRoot must return nil
 // when i exceeds the size of the tree. subtreeRoot is guaranteed to be called
 // with monotonically increasing i and j.
-func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte) {
+func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte, err error) {
 	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
 		panic("BuildRangeProof: illegal proof range")
 	}
@@ -30,9 +34,9 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte)
 	for i := uint64(0); leafIndex < proofStart; i++ {
 		subtreeSize := 1 << (64 - i)
 		if proofStart&subtreeSize != 0 {
-			root := h.NextSubtreeRoot(subtreeSize)
-			if root == nil {
-				break
+			root, err := h.NextSubtreeRoot(subtreeSize)
+			if err != nil {
+				return nil, err
 			}
 			proof = append(proof, root)
 			leafIndex += subtreeSize
@@ -40,7 +44,12 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte)
 	}
 
 	// skip leaves within proof range
-	h.Skip(proofEnd - proofStart)
+	if err := h.Skip(proofEnd - proofStart); err != nil {
+		// ignore EOF errors
+		if err != io.EOF && err != io.ErrUnexpectedEOF {
+			return nil, err
+		}
+	}
 
 	// add proof hashes from proofEnd onward, stopping when subtreeRoot
 	// returns nil.
@@ -48,15 +57,17 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte)
 	for i := uint64(0); i < 64; i++ {
 		subtreeSize := 1 << i
 		if endMask&uint64(subtreeSize) != 0 {
-			root := h.NextSubtreeRoot(subtreeSize)
-			if root == nil {
+			root, err := h.NextSubtreeRoot(subtreeSize)
+			if err == io.EOF {
 				break
+			} else if err != nil {
+				return nil, err
 			}
 			proof = append(proof, root)
 			leafIndex += subtreeSize
 		}
 	}
-	return proof
+	return proof, nil
 }
 
 // VerifyRangeProof verifies a proof produced by BuildRangeProof.
@@ -74,14 +85,10 @@ type SubtreeReader struct {
 	r    io.Reader
 	leaf []byte
 	s    *Stack
-	err  error
 }
 
 // NextSubtreeRoot implements SubtreeHasher.
-func (sr *SubtreeReader) NextSubtreeRoot(n int) []byte {
-	if sr.err != nil {
-		return nil
-	}
+func (sr *SubtreeReader) NextSubtreeRoot(n int) ([]byte, error) {
 	sr.s.Reset()
 	for i := 0; i < n; i++ {
 		n, err := io.ReadFull(sr.r, sr.leaf)
@@ -91,31 +98,26 @@ func (sr *SubtreeReader) NextSubtreeRoot(n int) []byte {
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			break // reading a partial leaf is normal at the end of the stream
 		} else if err != nil {
-			sr.err = err
-			return nil
+			return nil, err
 		}
 	}
-	return sr.s.Root()
+	if sr.s.NumNodes() == 0 {
+		// we didn't read anything; return EOF
+		return nil, io.EOF
+	}
+	return sr.s.Root(), nil
 }
 
 // Skip implements SubtreeHasher.
-func (sr *SubtreeReader) Skip(n int) {
-	if sr.err != nil {
-		return
-	}
+func (sr *SubtreeReader) Skip(n int) (err error) {
 	skipSize := int64(len(sr.leaf) * n)
 	if s, ok := sr.r.(io.Seeker); ok {
-		_, sr.err = s.Seek(skipSize, io.SeekCurrent)
+		_, err = s.Seek(skipSize, io.SeekCurrent)
 	} else {
 		// fake a seek method
-		_, sr.err = io.CopyN(ioutil.Discard, sr.r, skipSize)
+		_, err = io.CopyN(ioutil.Discard, sr.r, skipSize)
 	}
-}
-
-// Err returns the first error encountered by the underlying io.Reader. io.EOF
-// and io.ErrUnexpectedEOF errors are suppressed.
-func (sr *SubtreeReader) Err() error {
-	return sr.err
+	return
 }
 
 // NewSubtreeReader returns a new SubtreeReader that reads leaf data from r.
@@ -133,9 +135,7 @@ func BuildReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proof
 	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
 		panic("BuildReaderRangeProof: illegal proof range")
 	}
-	sr := NewSubtreeReader(r, leafSize, h)
-	proof := BuildRangeProof(proofStart, proofEnd, sr)
-	return proof, sr.Err()
+	return BuildRangeProof(proofStart, proofEnd, NewSubtreeReader(r, leafSize, h))
 }
 
 // VerifyReaderRangeProof verifies a proof produced by BuildRangeProof, using
