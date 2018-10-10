@@ -19,11 +19,8 @@ type SubtreeHasher interface {
 	Skip(n int) error
 }
 
-// BuildRangeProof constructs a proof for the leaf range [start, end).
-// subtreeRoot should return the root of the subtree comprising leaves [i,j),
-// where j may extend beyond the size of the tree. subtreeRoot must return nil
-// when i exceeds the size of the tree. subtreeRoot is guaranteed to be called
-// with monotonically increasing i and j.
+// BuildRangeProof constructs a proof for the leaf range [start, end) using
+// the provided SubtreeHasher.
 func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte, err error) {
 	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
 		panic("BuildRangeProof: illegal proof range")
