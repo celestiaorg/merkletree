@@ -97,15 +97,14 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte,
 	// the second yields the full range proof shown in the first diagram.
 
 	// add proof hashes from leaves [0, proofStart)
-	leafIndex := uint64(0)
-	for subtreeSize := uint64(1 << 63); leafIndex < uint64(proofStart); subtreeSize >>= 1 {
-		if uint64(proofStart)&subtreeSize != 0 {
-			root, err := h.NextSubtreeRoot(int(subtreeSize))
+	for i := 63; i >= 0; i-- {
+		subtreeSize := 1 << uint64(i)
+		if proofStart&subtreeSize != 0 {
+			root, err := h.NextSubtreeRoot(subtreeSize)
 			if err != nil {
 				return nil, err
 			}
 			proof = append(proof, root)
-			leafIndex += subtreeSize
 		}
 	}
 
@@ -119,9 +118,10 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte,
 
 	// add proof hashes from proofEnd onward, stopping when NextSubtreeRoot
 	// returns io.EOF.
-	endMask := uint64(proofEnd - 1)
-	for subtreeSize := uint64(1); subtreeSize < 1<<63; subtreeSize <<= 1 {
-		if endMask&uint64(subtreeSize) == 0 {
+	endMask := proofEnd - 1
+	for i := 0; i < 64; i++ {
+		subtreeSize := 1 << uint64(i)
+		if endMask&subtreeSize == 0 {
 			root, err := h.NextSubtreeRoot(int(subtreeSize))
 			if err == io.EOF {
 				break
@@ -129,7 +129,6 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte,
 				return nil, err
 			}
 			proof = append(proof, root)
-			leafIndex += subtreeSize
 		}
 	}
 	return proof, nil
@@ -216,10 +215,10 @@ func VerifyReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proo
 	tree := New(h)
 
 	// add proof hashes up to proofStart
-	for i := uint64(63); i != ^uint64(0) && len(proof) > 0; i-- {
-		subtreeSize := 1 << i
+	for i := 63; i >= 0 && len(proof) > 0; i-- {
+		subtreeSize := 1 << uint64(i)
 		if proofStart&subtreeSize != 0 {
-			if err := tree.PushSubTree(int(i), proof[0]); err != nil {
+			if err := tree.PushSubTree(i, proof[0]); err != nil {
 				// PushSubTree only returns an error if i is greater than the
 				// current smallest subtree. Since the loop proceeds in
 				// descending order, this should never happen.
@@ -247,11 +246,11 @@ func VerifyReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proo
 	}
 
 	// add proof hashes after proofEnd
-	endMask := uint64(proofEnd - 1)
-	for i := uint64(0); len(proof) > 0; i++ {
-		subtreeSize := uint64(1) << i
+	endMask := proofEnd - 1
+	for i := 0; i < 64 && len(proof) > 0; i++ {
+		subtreeSize := 1 << uint64(i)
 		if endMask&subtreeSize == 0 {
-			if err := tree.PushSubTree(int(i), proof[0]); err != nil {
+			if err := tree.PushSubTree(i, proof[0]); err != nil {
 				// This *probably* should never happen, but just to guard
 				// against adversarial inputs, return an error instead of
 				// panicking.
