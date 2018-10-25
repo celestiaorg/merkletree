@@ -29,19 +29,19 @@ func bytesRoot(b []byte, h hash.Hash, leafSize int) []byte {
 type precalcSubtreeHasher struct {
 	precalc     [][]byte
 	subtreeSize int
-	s           *Stack
+	h           hash.Hash
 	sh          SubtreeHasher
 }
 
 func (p *precalcSubtreeHasher) NextSubtreeRoot(n int) ([]byte, error) {
 	if n%p.subtreeSize == 0 && len(p.precalc) >= n/p.subtreeSize {
 		np := n / p.subtreeSize
-		p.s.Reset()
+		tree := New(p.h)
 		for _, root := range p.precalc[:np] {
-			p.s.AppendNode(root)
+			tree.PushSubTree(0, root)
 		}
 		p.precalc = p.precalc[np:]
-		return p.s.Root(), p.sh.Skip(n)
+		return tree.Root(), p.sh.Skip(n)
 	}
 	return p.sh.NextSubtreeRoot(n)
 }
@@ -59,7 +59,7 @@ func newPrecalcSubtreeHasher(precalc [][]byte, subtreeSize int, h hash.Hash, sh 
 	return &precalcSubtreeHasher{
 		precalc:     precalc,
 		subtreeSize: subtreeSize,
-		s:           NewStack(h),
+		h:           h,
 		sh:          sh,
 	}
 }
@@ -73,8 +73,8 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	const leafSize = 64
 	numLeaves := len(leafData) / 64
 	// convenience functions
-	s := NewStack(blake)
-	leafHash, nodeHash := s.leafHash, s.nodeHash
+	leafHash := func(leaf []byte) []byte { return leafSum(blake, leaf) }
+	nodeHash := func(left, right []byte) []byte { return nodeSum(blake, left, right) }
 
 	proof, err := BuildRangeProof(0, numLeaves, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
 	if err != nil {

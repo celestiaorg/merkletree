@@ -149,16 +149,16 @@ func VerifyRangeProof(leafData []byte, h hash.Hash, leafSize, proofStart, proofE
 type SubtreeReader struct {
 	r    io.Reader
 	leaf []byte
-	s    *Stack
+	h    hash.Hash
 }
 
 // NextSubtreeRoot implements SubtreeHasher.
 func (sr *SubtreeReader) NextSubtreeRoot(n int) ([]byte, error) {
-	sr.s.Reset()
+	tree := New(sr.h)
 	for i := 0; i < n; i++ {
 		n, err := io.ReadFull(sr.r, sr.leaf)
 		if n > 0 {
-			sr.s.AppendNode(sr.s.leafHash(sr.leaf[:n]))
+			tree.Push(sr.leaf[:n])
 		}
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			break // reading a partial leaf is normal at the end of the stream
@@ -166,11 +166,12 @@ func (sr *SubtreeReader) NextSubtreeRoot(n int) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if sr.s.NumNodes() == 0 {
+	root := tree.Root()
+	if root == nil {
 		// we didn't read anything; return EOF
 		return nil, io.EOF
 	}
-	return sr.s.Root(), nil
+	return root, nil
 }
 
 // Skip implements SubtreeHasher.
@@ -190,7 +191,7 @@ func NewSubtreeReader(r io.Reader, leafSize int, h hash.Hash) *SubtreeReader {
 	return &SubtreeReader{
 		r:    r,
 		leaf: make([]byte, leafSize),
-		s:    NewStack(h),
+		h:    h,
 	}
 }
 
@@ -211,14 +212,19 @@ func VerifyReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proo
 		panic("VerifyReaderRangeProof: illegal proof range")
 	}
 
-	// manually build a stack using the proof hashes
-	s := NewStack(h)
+	// manually build a tree using the proof hashes
+	tree := New(h)
 
 	// add proof hashes up to proofStart
 	for i := uint64(63); i != ^uint64(0) && len(proof) > 0; i-- {
 		subtreeSize := 1 << i
 		if proofStart&subtreeSize != 0 {
-			s.appendNodeAtHeight(proof[0], i)
+			if err := tree.PushSubTree(int(i), proof[0]); err != nil {
+				// PushSubTree only returns an error if i is greater than the
+				// current smallest subtree. Since the loop proceeds in
+				// descending order, this should never happen.
+				panic(err)
+			}
 			proof = proof[1:]
 		}
 	}
@@ -228,7 +234,7 @@ func VerifyReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proo
 	for i := proofStart; i < proofEnd; i++ {
 		n, err := io.ReadFull(r, leaf)
 		if n > 0 {
-			s.AppendNode(s.leafHash(leaf[:n]))
+			tree.Push(leaf[:n])
 		}
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			if i == proofEnd-1 {
@@ -241,14 +247,19 @@ func VerifyReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proo
 	}
 
 	// add proof hashes after proofEnd
-	endMask := 0 - uint64(proofEnd)
+	endMask := uint64(proofEnd - 1)
 	for i := uint64(0); len(proof) > 0; i++ {
-		subtreeSize := 1 << i
-		if endMask&uint64(subtreeSize) != 0 {
-			s.appendNodeAtHeight(proof[0], i)
+		subtreeSize := uint64(1) << i
+		if endMask&subtreeSize == 0 {
+			if err := tree.PushSubTree(int(i), proof[0]); err != nil {
+				// This *probably* should never happen, but just to guard
+				// against adversarial inputs, return an error instead of
+				// panicking.
+				return false, err
+			}
 			proof = proof[1:]
 		}
 	}
 
-	return bytes.Equal(s.Root(), root), nil
+	return bytes.Equal(tree.Root(), root), nil
 }
