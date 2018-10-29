@@ -188,7 +188,22 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 		}
 	}
 
-	// verify every hash in a proof
+	// build and verify every possible proof for a small tree
+	smallData := leafData[:leafSize*12]
+	smallRoot := bytesRoot(smallData, blake, leafSize)
+	for start := 0; start < 12; start++ {
+		for end := start + 1; end <= 12; end++ {
+			proof, err := BuildRangeProof(start, end, NewSubtreeReader(bytes.NewReader(smallData), leafSize, blake))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, smallRoot) {
+				t.Errorf("BuildRangeProof constructed an incorrect proof for range %v-%v", start, end)
+			}
+		}
+	}
+
+	// manually verify every hash in a proof
 	//
 	// NOTE: this is the same proof described in the BuildRangeProof comment:
 	//
@@ -199,7 +214,6 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	//    0   1 2   3 4   5 6   7 8   9 10  11
 	//              ^^^
 	//
-	smallData := leafData[:leafSize*12]
 	proof, err = BuildRangeProof(3, 5, NewSubtreeReader(bytes.NewReader(smallData), leafSize, blake))
 	if err != nil {
 		t.Fatal(err)
