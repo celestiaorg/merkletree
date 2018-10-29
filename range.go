@@ -19,6 +19,58 @@ type SubtreeHasher interface {
 	Skip(n int) error
 }
 
+// A SubtreeReader reads leaf data from an underlying stream and uses it to
+// calculate subtree roots.
+type SubtreeReader struct {
+	r    io.Reader
+	leaf []byte
+	h    hash.Hash
+}
+
+// NextSubtreeRoot implements SubtreeHasher.
+func (sr *SubtreeReader) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	tree := New(sr.h)
+	for i := 0; i < subtreeSize; i++ {
+		n, err := io.ReadFull(sr.r, sr.leaf)
+		if n > 0 {
+			tree.Push(sr.leaf[:n])
+		}
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			break // reading a partial leaf is normal at the end of the stream
+		} else if err != nil {
+			return nil, err
+		}
+	}
+	root := tree.Root()
+	if root == nil {
+		// we didn't read anything; return EOF to signal that there are no
+		// more subtrees to hash.
+		return nil, io.EOF
+	}
+	return root, nil
+}
+
+// Skip implements SubtreeHasher.
+func (sr *SubtreeReader) Skip(n int) (err error) {
+	skipSize := int64(len(sr.leaf) * n)
+	if s, ok := sr.r.(io.Seeker); ok {
+		_, err = s.Seek(skipSize, io.SeekCurrent)
+	} else {
+		// fake a seek method
+		_, err = io.CopyN(ioutil.Discard, sr.r, skipSize)
+	}
+	return
+}
+
+// NewSubtreeReader returns a new SubtreeReader that reads leaf data from r.
+func NewSubtreeReader(r io.Reader, leafSize int, h hash.Hash) *SubtreeReader {
+	return &SubtreeReader{
+		r:    r,
+		leaf: make([]byte, leafSize),
+		h:    h,
+	}
+}
+
 // BuildRangeProof constructs a proof for the leaf range [proofStart,
 // proofEnd) using the provided SubtreeHasher.
 func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte, err error) {
@@ -134,66 +186,6 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte,
 	return proof, nil
 }
 
-// VerifyRangeProof verifies a proof produced by BuildRangeProof.
-func VerifyRangeProof(leafData []byte, h hash.Hash, leafSize, proofStart, proofEnd int, proof [][]byte, root []byte) bool {
-	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
-		panic("VerifyRangeProof: illegal proof range")
-	}
-	ok, err := VerifyReaderRangeProof(bytes.NewReader(leafData), h, leafSize, proofStart, proofEnd, proof, root)
-	return ok && err == nil
-}
-
-// A SubtreeReader reads leaf data from an underlying stream and uses it to
-// calculate subtree roots.
-type SubtreeReader struct {
-	r    io.Reader
-	leaf []byte
-	h    hash.Hash
-}
-
-// NextSubtreeRoot implements SubtreeHasher.
-func (sr *SubtreeReader) NextSubtreeRoot(n int) ([]byte, error) {
-	tree := New(sr.h)
-	for i := 0; i < n; i++ {
-		n, err := io.ReadFull(sr.r, sr.leaf)
-		if n > 0 {
-			tree.Push(sr.leaf[:n])
-		}
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			break // reading a partial leaf is normal at the end of the stream
-		} else if err != nil {
-			return nil, err
-		}
-	}
-	root := tree.Root()
-	if root == nil {
-		// we didn't read anything; return EOF
-		return nil, io.EOF
-	}
-	return root, nil
-}
-
-// Skip implements SubtreeHasher.
-func (sr *SubtreeReader) Skip(n int) (err error) {
-	skipSize := int64(len(sr.leaf) * n)
-	if s, ok := sr.r.(io.Seeker); ok {
-		_, err = s.Seek(skipSize, io.SeekCurrent)
-	} else {
-		// fake a seek method
-		_, err = io.CopyN(ioutil.Discard, sr.r, skipSize)
-	}
-	return
-}
-
-// NewSubtreeReader returns a new SubtreeReader that reads leaf data from r.
-func NewSubtreeReader(r io.Reader, leafSize int, h hash.Hash) *SubtreeReader {
-	return &SubtreeReader{
-		r:    r,
-		leaf: make([]byte, leafSize),
-		h:    h,
-	}
-}
-
 // BuildReaderRangeProof constructs a proof for the range [proofStart,
 // proofEnd), using leaf data read from r.
 func BuildReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proofEnd int) ([][]byte, error) {
@@ -261,4 +253,13 @@ func VerifyReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proo
 	}
 
 	return bytes.Equal(tree.Root(), root), nil
+}
+
+// VerifyRangeProof verifies a proof produced by BuildRangeProof.
+func VerifyRangeProof(leafData []byte, h hash.Hash, leafSize, proofStart, proofEnd int, proof [][]byte, root []byte) bool {
+	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
+		panic("VerifyRangeProof: illegal proof range")
+	}
+	ok, err := VerifyReaderRangeProof(bytes.NewReader(leafData), h, leafSize, proofStart, proofEnd, proof, root)
+	return ok && err == nil
 }
