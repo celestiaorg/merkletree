@@ -188,6 +188,36 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 		}
 	}
 
+	// verify every hash in a proof
+	//
+	// NOTE: this is the same proof described in the BuildRangeProof comment:
+	//
+	//               ┌────────┴────────*
+	//         ┌─────┴─────┐           │
+	//      *──┴──┐     ┌──┴──*     ┌──┴──┐
+	//    ┌─┴─┐ *─┴─┐ ┌─┴─* ┌─┴─┐ ┌─┴─┐ ┌─┴─┐
+	//    0   1 2   3 4   5 6   7 8   9 10  11
+	//              ^^^
+	//
+	smallData := leafData[:leafSize*12]
+	proof, err = BuildRangeProof(3, 5, NewSubtreeReader(bytes.NewReader(smallData), leafSize, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subtreeRoot := func(i, j int) []byte {
+		return bytesRoot(smallData[i*leafSize:j*leafSize], blake, leafSize)
+	}
+	manualProof := [][]byte{
+		subtreeRoot(0, 2),
+		subtreeRoot(2, 3),
+		subtreeRoot(5, 6),
+		subtreeRoot(6, 8),
+		subtreeRoot(8, 12),
+	}
+	if !reflect.DeepEqual(proof, manualProof) {
+		t.Error("BuildRangeProof constructed a proof that differs from manual proof")
+	}
+
 	// test a proof with precomputed inputs
 	precalcRoots := [][]byte{
 		bytesRoot(leafData[:len(leafData)/2], blake, leafSize),
