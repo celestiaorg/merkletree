@@ -151,15 +151,40 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	}
 
 	// test some random proofs against VerifyRangeProof
-	for i := 0; i < 5; i++ {
-		start := fastrand.Intn(numLeaves - 1)
-		end := start + fastrand.Intn(numLeaves-start)
-		proof, err := BuildRangeProof(start, end, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, root) {
-			t.Errorf("BuildRangeProof constructed an incorrect proof for range %v-%v", start, end)
+	for nLeaves := 1; nLeaves <= 65; nLeaves++ {
+		for i := 0; i < 5; i++ {
+			start := fastrand.Intn(nLeaves)
+			end := start + fastrand.Intn(nLeaves-start) + 1
+			data := leafData[:nLeaves*leafSize]
+			proof, err := BuildRangeProof(start, end, NewSubtreeReader(bytes.NewReader(data), leafSize, blake))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, bytesRoot(data, blake, leafSize)) {
+				t.Errorf("BuildRangeProof constructed an incorrect proof for nLeaves=%v, range %v-%v", nLeaves, start, end)
+			}
+
+			// corrupt the proof; it should fail to verify
+			if len(proof) == 0 {
+				continue
+			}
+			switch fastrand.Intn(3) {
+			case 0:
+				// modify an element of the proof
+				proof[fastrand.Intn(len(proof))][fastrand.Intn(blake.Size())] += 1
+			case 1:
+				// add an element to the proof
+				proof = append(proof, make([]byte, blake.Size()))
+				i := fastrand.Intn(len(proof))
+				proof[i], proof[len(proof)-1] = proof[len(proof)-1], proof[i]
+			case 2:
+				// delete a random element of the proof
+				i := fastrand.Intn(len(proof))
+				proof = append(proof[:i], proof[i+1:]...)
+			}
+			if VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, bytesRoot(data, blake, leafSize)) {
+				t.Errorf("VerifyRangeProof verified an incorrect proof for nLeaves=%v, range %v-%v", nLeaves, start, end)
+			}
 		}
 	}
 
