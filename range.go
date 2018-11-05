@@ -18,21 +18,21 @@ type SubtreeHasher interface {
 	Skip(n int) error
 }
 
-// A SubtreeReader reads leaf data from an underlying stream and uses it to
-// calculate subtree roots.
-type SubtreeReader struct {
+// ReaderSubtreeHasher implements SubtreeHasher by reading leaf data from an
+// underlying stream.
+type ReaderSubtreeHasher struct {
 	r    io.Reader
 	h    hash.Hash
 	leaf []byte
 }
 
 // NextSubtreeRoot implements SubtreeHasher.
-func (sr *SubtreeReader) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
-	tree := New(sr.h)
+func (rsh *ReaderSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	tree := New(rsh.h)
 	for i := 0; i < subtreeSize; i++ {
-		n, err := io.ReadFull(sr.r, sr.leaf)
+		n, err := io.ReadFull(rsh.r, rsh.leaf)
 		if n > 0 {
-			tree.Push(sr.leaf[:n])
+			tree.Push(rsh.leaf[:n])
 		}
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			break // reading a partial leaf is normal at the end of the stream
@@ -50,23 +50,62 @@ func (sr *SubtreeReader) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
 }
 
 // Skip implements SubtreeHasher.
-func (sr *SubtreeReader) Skip(n int) (err error) {
-	skipSize := int64(len(sr.leaf) * n)
-	if s, ok := sr.r.(io.Seeker); ok {
+func (rsh *ReaderSubtreeHasher) Skip(n int) (err error) {
+	skipSize := int64(len(rsh.leaf) * n)
+	if s, ok := rsh.r.(io.Seeker); ok {
 		_, err = s.Seek(skipSize, io.SeekCurrent)
 	} else {
 		// fake a seek method
-		_, err = io.CopyN(ioutil.Discard, sr.r, skipSize)
+		_, err = io.CopyN(ioutil.Discard, rsh.r, skipSize)
 	}
 	return
 }
 
-// NewSubtreeReader returns a new SubtreeReader that reads leaf data from r.
-func NewSubtreeReader(r io.Reader, leafSize int, h hash.Hash) *SubtreeReader {
-	return &SubtreeReader{
+// NewReaderSubtreeHasher returns a new ReaderSubtreeHasher that reads leaf data from r.
+func NewReaderSubtreeHasher(r io.Reader, leafSize int, h hash.Hash) *ReaderSubtreeHasher {
+	return &ReaderSubtreeHasher{
 		r:    r,
-		leaf: make([]byte, leafSize),
 		h:    h,
+		leaf: make([]byte, leafSize),
+	}
+}
+
+// CachedSubtreeHasher implements SubtreeHasher using a set of precomputed
+// leaf hashes.
+type CachedSubtreeHasher struct {
+	leafHashes [][]byte
+	h          hash.Hash
+}
+
+// NextSubtreeRoot implements SubtreeHasher.
+func (csh *CachedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	if len(csh.leafHashes) == 0 {
+		return nil, io.EOF
+	}
+	tree := New(csh.h)
+	for i := 0; i < subtreeSize && len(csh.leafHashes) > 0; i++ {
+		tree.PushSubTree(0, csh.leafHashes[0])
+		csh.leafHashes = csh.leafHashes[1:]
+	}
+	return tree.Root(), nil
+}
+
+// Skip implements SubtreeHasher.
+func (csh *CachedSubtreeHasher) Skip(n int) error {
+	if n > len(csh.leafHashes) {
+		csh.leafHashes = nil
+	} else {
+		csh.leafHashes = csh.leafHashes[n:]
+	}
+	return nil
+}
+
+// NewCachedSubtreeHasher creates a CachedSubtreeHasher using the specified
+// leaf hashes and hash function.
+func NewCachedSubtreeHasher(leafHashes [][]byte, h hash.Hash) *CachedSubtreeHasher {
+	return &CachedSubtreeHasher{
+		leafHashes: leafHashes,
+		h:          h,
 	}
 }
 
@@ -182,6 +221,7 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte,
 			proof = append(proof, root)
 		}
 	}
+
 	return proof, nil
 }
 
