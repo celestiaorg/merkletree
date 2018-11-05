@@ -64,9 +64,9 @@ func newPrecalcSubtreeHasher(precalc [][]byte, subtreeSize int, h hash.Hash, sh 
 	}
 }
 
-// TestReaderBuildVerifyRangeProof tests the BuildRangeProof and VerifyRangeProof
+// testBuildVerifyRangeProof tests the BuildRangeProof and VerifyRangeProof
 // functions.
-func TestReaderBuildVerifyRangeProof(t *testing.T) {
+func TestBuildVerifyRangeProof(t *testing.T) {
 	// setup proof parameters
 	blake, _ := blake2b.New256(nil)
 	leafData := make([]byte, 1<<22)
@@ -86,14 +86,28 @@ func TestReaderBuildVerifyRangeProof(t *testing.T) {
 		return nodeSum(blake, left, right)
 	}
 	buildProof := func(start, end int) [][]byte {
-		proof, err := BuildRangeProof(start, end, NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake))
+		// flip a coin to decide whether to use leaf data or leaf hashes
+		var sh SubtreeHasher
+		if fastrand.Intn(2) == 0 {
+			sh = NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake)
+		} else {
+			sh = NewCachedSubtreeHasher(leafHashes, blake)
+		}
+		proof, err := BuildRangeProof(start, end, sh)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return proof
+
 	}
 	verifyProof := func(start, end int, proof [][]byte) bool {
-		lh := NewReaderLeafHasher(bytes.NewReader(leafData[start*leafSize:end*leafSize]), blake, leafSize)
+		// flip a coin to decide whether to use leaf data or leaf hashes
+		var lh LeafHasher
+		if fastrand.Intn(2) == 0 {
+			lh = NewReaderLeafHasher(bytes.NewReader(leafData[start*leafSize:end*leafSize]), blake, leafSize)
+		} else {
+			lh = NewCachedLeafHasher(leafHashes[start:end])
+		}
 		ok, err := VerifyRangeProof(lh, blake, start, end, proof, root)
 		if err != nil {
 			t.Fatal(err)
@@ -164,216 +178,28 @@ func TestReaderBuildVerifyRangeProof(t *testing.T) {
 
 	// for more intensive testing, use smaller trees
 	buildSmallProof := func(start, end, nLeaves int) [][]byte {
-		proof, err := BuildRangeProof(start, end, NewReaderSubtreeHasher(bytes.NewReader(leafData[:leafSize*nLeaves]), leafSize, blake))
+		// flip a coin to decide whether to use leaf data or leaf hashes
+		var sh SubtreeHasher
+		if fastrand.Intn(2) == 0 {
+			sh = NewReaderSubtreeHasher(bytes.NewReader(leafData[:leafSize*nLeaves]), leafSize, blake)
+		} else {
+			sh = NewCachedSubtreeHasher(leafHashes[:nLeaves], blake)
+		}
+		proof, err := BuildRangeProof(start, end, sh)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return proof
+
 	}
 	verifySmallProof := func(start, end int, proof [][]byte, nLeaves int) bool {
-		lh := NewReaderLeafHasher(bytes.NewReader(leafData[start*leafSize:end*leafSize]), blake, leafSize)
-		smallRoot := bytesRoot(leafData[:leafSize*nLeaves], blake, leafSize)
-		ok, err := VerifyRangeProof(lh, blake, start, end, proof, smallRoot)
-		if err != nil {
-			t.Fatal(err)
+		// flip a coin to decide whether to use leaf data or leaf hashes
+		var lh LeafHasher
+		if fastrand.Intn(2) == 0 {
+			lh = NewReaderLeafHasher(bytes.NewReader(leafData[start*leafSize:end*leafSize]), blake, leafSize)
+		} else {
+			lh = NewCachedLeafHasher(leafHashes[start:end])
 		}
-		return ok
-	}
-
-	// test some random proofs against VerifyRangeProof
-	for nLeaves := 1; nLeaves <= 65; nLeaves++ {
-		for n := 0; n < 5; n++ {
-			start := fastrand.Intn(nLeaves)
-			end := start + fastrand.Intn(nLeaves-start) + 1
-			proof := buildSmallProof(start, end, nLeaves)
-			if !verifySmallProof(start, end, proof, nLeaves) {
-				t.Errorf("BuildRangeProof constructed an incorrect proof for nLeaves=%v, range %v-%v", nLeaves, start, end)
-			}
-
-			// corrupt the proof; it should fail to verify
-			if len(proof) == 0 {
-				continue
-			}
-			switch fastrand.Intn(3) {
-			case 0:
-				// modify an element of the proof
-				proof[fastrand.Intn(len(proof))][fastrand.Intn(blake.Size())] += 1
-			case 1:
-				// add an element to the proof
-				proof = append(proof, make([]byte, blake.Size()))
-				i := fastrand.Intn(len(proof))
-				proof[i], proof[len(proof)-1] = proof[len(proof)-1], proof[i]
-			case 2:
-				// delete a random element of the proof
-				i := fastrand.Intn(len(proof))
-				proof = append(proof[:i], proof[i+1:]...)
-			}
-			if verifyProof(start, end, proof) {
-				t.Errorf("VerifyRangeProof verified an incorrect proof for nLeaves=%v, range %v-%v", nLeaves, start, end)
-			}
-		}
-	}
-
-	// build and verify every possible proof for a small tree
-	for start := 0; start < 12; start++ {
-		for end := start + 1; end <= 12; end++ {
-			proof := buildSmallProof(start, end, 12)
-			if !verifySmallProof(start, end, proof, 12) {
-				t.Errorf("BuildRangeProof constructed an incorrect proof for range %v-%v", start, end)
-			}
-		}
-	}
-
-	// manually verify every hash in a proof
-	//
-	// NOTE: this is the same proof described in the BuildRangeProof comment:
-	//
-	//               ┌────────┴────────*
-	//         ┌─────┴─────┐           │
-	//      *──┴──┐     ┌──┴──*     ┌──┴──┐
-	//    ┌─┴─┐ *─┴─┐ ┌─┴─* ┌─┴─┐ ┌─┴─┐ ┌─┴─┐
-	//    0   1 2   3 4   5 6   7 8   9 10  11
-	//              ^^^
-	//
-	proof = buildSmallProof(3, 5, 12)
-	subtreeRoot := func(i, j int) []byte {
-		return bytesRoot(leafData[i*leafSize:j*leafSize], blake, leafSize)
-	}
-	manualProof := [][]byte{
-		subtreeRoot(0, 2),
-		subtreeRoot(2, 3),
-		subtreeRoot(5, 6),
-		subtreeRoot(6, 8),
-		subtreeRoot(8, 12),
-	}
-	if !reflect.DeepEqual(proof, manualProof) {
-		t.Error("BuildRangeProof constructed a proof that differs from manual proof")
-	}
-
-	// test a proof with precomputed inputs
-	precalcRoots := [][]byte{
-		bytesRoot(leafData[:len(leafData)/2], blake, leafSize),
-		bytesRoot(leafData[len(leafData)/2:], blake, leafSize),
-	}
-	precalc := newPrecalcSubtreeHasher(precalcRoots, numLeaves/2, blake, NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake))
-	proof, err := BuildRangeProof(numLeaves-1, numLeaves, precalc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recalcProof, err := BuildRangeProof(numLeaves-1, numLeaves, NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake))
-	if !reflect.DeepEqual(proof, recalcProof) {
-		t.Fatal("precalc failed")
-	}
-}
-
-// TestCachedBuildVerifyRangeProof tests the BuildRangeProof and
-// VerifyRangeProof functions using cached leaf hashes.
-func TestCachedBuildVerifyRangeProof(t *testing.T) {
-	// setup proof parameters
-	blake, _ := blake2b.New256(nil)
-	leafData := make([]byte, 1<<22)
-	const leafSize = 64
-	numLeaves := len(leafData) / 64
-	leafHashes := make([][]byte, numLeaves)
-	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
-	}
-	root := bytesRoot(leafData, blake, leafSize)
-
-	// convenience functions
-	leafHash := func(leaf []byte) []byte {
-		return leafSum(blake, leaf)
-	}
-	nodeHash := func(left, right []byte) []byte {
-		return nodeSum(blake, left, right)
-	}
-	buildProof := func(start, end int) [][]byte {
-		proof, err := BuildRangeProof(start, end, NewCachedSubtreeHasher(leafHashes, blake))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return proof
-	}
-	verifyProof := func(start, end int, proof [][]byte) bool {
-		lh := NewCachedLeafHasher(leafHashes[start:end])
-		ok, err := VerifyRangeProof(lh, blake, start, end, proof, root)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return ok
-	}
-
-	// test some known proofs
-	proof := buildProof(0, numLeaves)
-	if len(proof) != 0 {
-		t.Error("BuildRangeProof constructed an incorrect proof for the entire sector")
-	}
-
-	proof = buildProof(0, 1)
-	checkRoot := leafHash(leafData[:leafSize])
-	for i := range proof {
-		checkRoot = nodeHash(checkRoot, proof[i])
-	}
-	if hex.EncodeToString(checkRoot) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
-		t.Error("BuildRangeProof constructed an incorrect proof for the first leaf")
-	} else if !verifyProof(0, 1, proof) {
-		t.Error("VerifyRangeProof failed to verify a known correct proof")
-	}
-
-	proof = buildProof(numLeaves-1, numLeaves)
-	checkRoot = leafHash(leafData[len(leafData)-leafSize:])
-	for i := range proof {
-		checkRoot = nodeHash(proof[len(proof)-i-1], checkRoot)
-	}
-	if hex.EncodeToString(checkRoot) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
-		t.Error("BuildRangeProof constructed an incorrect proof for the last leaf")
-	} else if !verifyProof(numLeaves-1, numLeaves, proof) {
-		t.Error("VerifyRangeProof failed to verify a known correct proof")
-	}
-
-	proof = buildProof(10, 11)
-	checkRoot = leafHash(leafData[10*leafSize:][:leafSize])
-	checkRoot = nodeHash(checkRoot, proof[2])
-	checkRoot = nodeHash(proof[1], checkRoot)
-	checkRoot = nodeHash(checkRoot, proof[3])
-	checkRoot = nodeHash(proof[0], checkRoot)
-	for i := 4; i < len(proof); i++ {
-		checkRoot = nodeHash(checkRoot, proof[i])
-	}
-	if hex.EncodeToString(checkRoot) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
-		t.Error("BuildRangeProof constructed an incorrect proof for a middle leaf")
-	} else if !verifyProof(10, 11, proof) {
-		t.Error("VerifyRangeProof failed to verify a known correct proof")
-	}
-
-	// this is the largest possible proof
-	midl, midr := numLeaves/2-1, numLeaves/2+1
-	proof = buildProof(midl, midr)
-	left := leafHash(leafData[midl*leafSize:][:leafSize])
-	for i := 0; i < len(proof)/2; i++ {
-		left = nodeHash(proof[len(proof)/2-i-1], left)
-	}
-	right := leafHash(leafData[(midr-1)*leafSize:][:leafSize])
-	for i := len(proof) / 2; i < len(proof); i++ {
-		right = nodeHash(right, proof[i])
-	}
-	checkRoot = nodeHash(left, right)
-	if hex.EncodeToString(checkRoot) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
-		t.Error("BuildRangeProof constructed an incorrect proof for worst-case inputs")
-	} else if !verifyProof(midl, midr, proof) {
-		t.Error("VerifyRangeProof failed to verify a known correct proof")
-	}
-
-	// for more intensive testing, use smaller trees
-	buildSmallProof := func(start, end, nLeaves int) [][]byte {
-		proof, err := BuildRangeProof(start, end, NewCachedSubtreeHasher(leafHashes[:nLeaves], blake))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return proof
-	}
-	verifySmallProof := func(start, end int, proof [][]byte, nLeaves int) bool {
-		lh := NewCachedLeafHasher(leafHashes[start:end])
 		smallRoot := bytesRoot(leafData[:leafSize*nLeaves], blake, leafSize)
 		ok, err := VerifyRangeProof(lh, blake, start, end, proof, smallRoot)
 		if err != nil {
