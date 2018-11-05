@@ -276,7 +276,8 @@ func (t *Tree) Root() []byte {
 	for current.next != nil {
 		current = joinSubTrees(t.hash, current.next, current)
 	}
-	return current.sum
+	// Return a copy to prevent leaking a pointer to internal data.
+	return append(current.sum[:0:0], current.sum...)
 }
 
 // SetIndex will tell the Tree to create a storage proof for the leaf at the
