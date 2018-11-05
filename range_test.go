@@ -64,6 +64,12 @@ func newPrecalcSubtreeHasher(precalc [][]byte, subtreeSize int, h hash.Hash, sh 
 	}
 }
 
+func verifyRangeProofBytes(leafdata []byte, h hash.Hash, leafSize, proofStart, proofEnd int, proof [][]byte, root []byte) bool {
+	lh := NewReaderLeafHasher(bytes.NewReader(leafdata), h, leafSize)
+	ok, _ := VerifyRangeProof(lh, h, proofStart, proofEnd, proof, root)
+	return ok
+}
+
 // TestBuildVerifyRangeProof tests the BuildRangeProof and VerifyRangeProof
 // functions.
 func TestBuildVerifyRangeProof(t *testing.T) {
@@ -93,7 +99,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	}
 	if hex.EncodeToString(root) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
 		t.Error("BuildRangeProof constructed an incorrect proof for the first leaf")
-	} else if !VerifyRangeProof(leafData[:leafSize], blake, leafSize, 0, 1, proof, root) {
+	} else if !verifyRangeProofBytes(leafData[:leafSize], blake, leafSize, 0, 1, proof, root) {
 		t.Error("VerifyRangeProof failed to verify a known correct proof")
 	}
 
@@ -107,7 +113,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	}
 	if hex.EncodeToString(root) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
 		t.Error("BuildRangeProof constructed an incorrect proof for the last leaf")
-	} else if !VerifyRangeProof(leafData[len(leafData)-leafSize:], blake, leafSize, numLeaves-1, numLeaves, proof, root) {
+	} else if !verifyRangeProofBytes(leafData[len(leafData)-leafSize:], blake, leafSize, numLeaves-1, numLeaves, proof, root) {
 		t.Error("VerifyRangeProof failed to verify a known correct proof")
 	}
 
@@ -125,7 +131,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	}
 	if hex.EncodeToString(root) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
 		t.Error("BuildRangeProof constructed an incorrect proof for a middle leaf")
-	} else if !VerifyRangeProof(leafData[10*leafSize:11*leafSize], blake, leafSize, 10, 11, proof, root) {
+	} else if !verifyRangeProofBytes(leafData[10*leafSize:11*leafSize], blake, leafSize, 10, 11, proof, root) {
 		t.Error("VerifyRangeProof failed to verify a known correct proof")
 	}
 
@@ -146,7 +152,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	root = nodeHash(left, right)
 	if hex.EncodeToString(root) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
 		t.Error("BuildRangeProof constructed an incorrect proof for worst-case inputs")
-	} else if !VerifyRangeProof(leafData[midl*leafSize:midr*leafSize], blake, leafSize, midl, midr, proof, root) {
+	} else if !verifyRangeProofBytes(leafData[midl*leafSize:midr*leafSize], blake, leafSize, midl, midr, proof, root) {
 		t.Error("VerifyRangeProof failed to verify a known correct proof")
 	}
 
@@ -160,7 +166,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, bytesRoot(data, blake, leafSize)) {
+			if !verifyRangeProofBytes(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, bytesRoot(data, blake, leafSize)) {
 				t.Errorf("BuildRangeProof constructed an incorrect proof for nLeaves=%v, range %v-%v", nLeaves, start, end)
 			}
 
@@ -182,7 +188,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 				i := fastrand.Intn(len(proof))
 				proof = append(proof[:i], proof[i+1:]...)
 			}
-			if VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, bytesRoot(data, blake, leafSize)) {
+			if verifyRangeProofBytes(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, bytesRoot(data, blake, leafSize)) {
 				t.Errorf("VerifyRangeProof verified an incorrect proof for nLeaves=%v, range %v-%v", nLeaves, start, end)
 			}
 		}
@@ -197,7 +203,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, smallRoot) {
+			if !verifyRangeProofBytes(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, smallRoot) {
 				t.Errorf("BuildRangeProof constructed an incorrect proof for range %v-%v", start, end)
 			}
 		}
@@ -248,41 +254,8 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	}
 
 	// test malformed inputs
-	if VerifyRangeProof(make([]byte, leafSize), blake, leafSize, 0, 1, nil, nil) {
+	if verifyRangeProofBytes(make([]byte, leafSize), blake, leafSize, 0, 1, nil, nil) {
 		t.Error("VerifyRangeProof verified an incorrect proof")
-	}
-}
-
-// TestBuildVerifyReaderRangeProof tests the BuildReaderRangeProof and
-// VerifyReaderRangeProof functions.
-func TestBuildVerifyReaderRangeProof(t *testing.T) {
-	blake, _ := blake2b.New256(nil)
-	for i := 0; i < 10; i++ {
-	retry:
-		leafSize := fastrand.Intn(1 << 8)
-		if leafSize == 0 {
-			goto retry
-		}
-		data := fastrand.Bytes(leafSize*4 + fastrand.Intn(1<<10))
-		numLeaves := len(data) / leafSize
-		if len(data)%leafSize != 0 {
-			numLeaves++
-		}
-		start := fastrand.Intn(numLeaves - 1)
-		end := start + fastrand.Intn(numLeaves-start)
-		if start == end {
-			goto retry
-		}
-		proof, err := BuildReaderRangeProof(bytes.NewReader(data), blake, leafSize, start, end)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ok, err := VerifyReaderRangeProof(bytes.NewReader(data[start*leafSize:]), blake, leafSize, start, end, proof, bytesRoot(data, blake, leafSize))
-		if err != nil {
-			t.Fatal(err)
-		} else if !ok {
-			t.Fatal("VerifyReaderProof failed to verify proof produced by BuildReaderProof")
-		}
 	}
 }
 
@@ -330,7 +303,7 @@ func BenchmarkBuildRangeProofPrecalc(b *testing.B) {
 			precalc := newPrecalcSubtreeHasher(precalcRoots, precalcSize, blake, NewSubtreeReader(bytes.NewReader(leafData), leafSize, blake))
 			b.ReportAllocs()
 			proof, _ := BuildRangeProof(start, end, precalc)
-			if !VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, root) {
+			if !verifyRangeProofBytes(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, root) {
 				b.Fatal("precalculated roots are incorrect")
 			}
 			for i := 0; i < b.N; i++ {
@@ -346,7 +319,7 @@ func BenchmarkBuildRangeProofPrecalc(b *testing.B) {
 
 // BenchmarkVerifyRangeProof benchmarks the performance of VerifyRangeProof
 // for various proof ranges.
-func BenchmarkVerifyRangeProof(b *testing.B) {
+func BenchmarkverifyRangeProofBytes(b *testing.B) {
 	blake, _ := blake2b.New256(nil)
 	leafData := fastrand.Bytes(1 << 22)
 	const leafSize = 64
@@ -358,7 +331,7 @@ func BenchmarkVerifyRangeProof(b *testing.B) {
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				_ = VerifyRangeProof(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, root)
+				_ = verifyRangeProofBytes(leafData[start*leafSize:end*leafSize], blake, leafSize, start, end, proof, root)
 			}
 		}
 	}
