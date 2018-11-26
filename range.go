@@ -12,9 +12,11 @@ import (
 type SubtreeHasher interface {
 	// NextSubtreeRoot returns the root of the next n leaves. If fewer than n
 	// leaves are left in the tree, NextSubtreeRoot returns the root of those
-	// leaves. If no leaves are left, NextSubtreeRoot returns io.EOF.
+	// leaves and nil. If no leaves are left, NextSubtreeRoot returns io.EOF.
 	NextSubtreeRoot(n int) ([]byte, error)
-	// Skip skips the next n leaves.
+	// Skip skips the next n leaves. If fewer than n leaves are left in the
+	// tree, Skip returns io.ErrUnexpectedEOF. If exactly n leaves are left,
+	// Skip returns nil (not io.EOF).
 	Skip(n int) error
 }
 
@@ -52,13 +54,17 @@ func (rsh *ReaderSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error)
 // Skip implements SubtreeHasher.
 func (rsh *ReaderSubtreeHasher) Skip(n int) (err error) {
 	skipSize := int64(len(rsh.leaf) * n)
+	var skipped int64
 	if s, ok := rsh.r.(io.Seeker); ok {
-		_, err = s.Seek(skipSize, io.SeekCurrent)
+		skipped, err = s.Seek(skipSize, io.SeekCurrent)
 	} else {
 		// fake a seek method
-		_, err = io.CopyN(ioutil.Discard, rsh.r, skipSize)
+		skipped, err = io.CopyN(ioutil.Discard, rsh.r, skipSize)
 	}
-	return
+	if skipped != skipSize {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
 }
 
 // NewReaderSubtreeHasher returns a new ReaderSubtreeHasher that reads leaf data from r.
@@ -93,10 +99,9 @@ func (csh *CachedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error)
 // Skip implements SubtreeHasher.
 func (csh *CachedSubtreeHasher) Skip(n int) error {
 	if n > len(csh.leafHashes) {
-		csh.leafHashes = nil
-	} else {
-		csh.leafHashes = csh.leafHashes[n:]
+		return io.ErrUnexpectedEOF
 	}
+	csh.leafHashes = csh.leafHashes[n:]
 	return nil
 }
 
@@ -200,10 +205,7 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte,
 
 	// skip leaves within proof range
 	if err := h.Skip(proofEnd - proofStart); err != nil {
-		// ignore EOF errors
-		if err != io.EOF && err != io.ErrUnexpectedEOF {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	// add proof hashes from proofEnd onward, stopping when NextSubtreeRoot

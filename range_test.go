@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"hash"
+	"io"
 	"reflect"
 	"testing"
 
@@ -291,6 +292,36 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	recalcProof, err := BuildRangeProof(numLeaves-1, numLeaves, NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake))
 	if !reflect.DeepEqual(proof, recalcProof) {
 		t.Fatal("precalc failed")
+	}
+}
+
+// TestBuildProofRangeEOF tests that BuildRangeProof behaves correctly in the
+// presence of EOF errors.
+func TestBuildProofRangeEOF(t *testing.T) {
+	// setup proof parameters
+	blake, _ := blake2b.New256(nil)
+	leafData := make([]byte, 1<<22)
+	const leafSize = 64
+	numLeaves := len(leafData) / 64
+	leafHashes := make([][]byte, numLeaves)
+	for i := range leafHashes {
+		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+	}
+
+	// build a proof for the middle of the tree, but only supply half of the
+	// leafData. This should trigger an io.ErrUnexpectedEOF when
+	// BuildRangeProof tries to skip over the proof range.
+	midl, midr := numLeaves/2-1, numLeaves/2+1
+
+	// test with both ReaderSubtreeHasher and CachedSubtreeHasher
+	shs := []SubtreeHasher{
+		NewReaderSubtreeHasher(bytes.NewReader(leafData[:len(leafData)/2]), leafSize, blake),
+		NewCachedSubtreeHasher(leafHashes[:len(leafHashes)/2], blake),
+	}
+	for i, sh := range shs {
+		if _, err := BuildRangeProof(midl, midr, sh); err != io.ErrUnexpectedEOF {
+			t.Fatal("expected io.ErrUnexpectedEOF, got", err)
+		}
 	}
 }
 
