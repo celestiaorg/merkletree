@@ -2,7 +2,6 @@ package merkletree
 
 import (
 	"bytes"
-	"errors"
 	"hash"
 	"io"
 	"io/ioutil"
@@ -13,27 +12,29 @@ import (
 type SubtreeHasher interface {
 	// NextSubtreeRoot returns the root of the next n leaves. If fewer than n
 	// leaves are left in the tree, NextSubtreeRoot returns the root of those
-	// leaves. If no leaves are left, NextSubtreeRoot returns io.EOF.
+	// leaves and nil. If no leaves are left, NextSubtreeRoot returns io.EOF.
 	NextSubtreeRoot(n int) ([]byte, error)
-	// Skip skips the next n leaves.
+	// Skip skips the next n leaves. If fewer than n leaves are left in the
+	// tree, Skip returns io.ErrUnexpectedEOF. If exactly n leaves are left,
+	// Skip returns nil (not io.EOF).
 	Skip(n int) error
 }
 
-// A SubtreeReader reads leaf data from an underlying stream and uses it to
-// calculate subtree roots.
-type SubtreeReader struct {
+// ReaderSubtreeHasher implements SubtreeHasher by reading leaf data from an
+// underlying stream.
+type ReaderSubtreeHasher struct {
 	r    io.Reader
-	leaf []byte
 	h    hash.Hash
+	leaf []byte
 }
 
 // NextSubtreeRoot implements SubtreeHasher.
-func (sr *SubtreeReader) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
-	tree := New(sr.h)
+func (rsh *ReaderSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	tree := New(rsh.h)
 	for i := 0; i < subtreeSize; i++ {
-		n, err := io.ReadFull(sr.r, sr.leaf)
+		n, err := io.ReadFull(rsh.r, rsh.leaf)
 		if n > 0 {
-			tree.Push(sr.leaf[:n])
+			tree.Push(rsh.leaf[:n])
 		}
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			break // reading a partial leaf is normal at the end of the stream
@@ -51,23 +52,65 @@ func (sr *SubtreeReader) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
 }
 
 // Skip implements SubtreeHasher.
-func (sr *SubtreeReader) Skip(n int) (err error) {
-	skipSize := int64(len(sr.leaf) * n)
-	if s, ok := sr.r.(io.Seeker); ok {
-		_, err = s.Seek(skipSize, io.SeekCurrent)
+func (rsh *ReaderSubtreeHasher) Skip(n int) (err error) {
+	skipSize := int64(len(rsh.leaf) * n)
+	var skipped int64
+	if s, ok := rsh.r.(io.Seeker); ok {
+		skipped, err = s.Seek(skipSize, io.SeekCurrent)
 	} else {
 		// fake a seek method
-		_, err = io.CopyN(ioutil.Discard, sr.r, skipSize)
+		skipped, err = io.CopyN(ioutil.Discard, rsh.r, skipSize)
 	}
-	return
+	if skipped != skipSize {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
 }
 
-// NewSubtreeReader returns a new SubtreeReader that reads leaf data from r.
-func NewSubtreeReader(r io.Reader, leafSize int, h hash.Hash) *SubtreeReader {
-	return &SubtreeReader{
+// NewReaderSubtreeHasher returns a new ReaderSubtreeHasher that reads leaf data from r.
+func NewReaderSubtreeHasher(r io.Reader, leafSize int, h hash.Hash) *ReaderSubtreeHasher {
+	return &ReaderSubtreeHasher{
 		r:    r,
-		leaf: make([]byte, leafSize),
 		h:    h,
+		leaf: make([]byte, leafSize),
+	}
+}
+
+// CachedSubtreeHasher implements SubtreeHasher using a set of precomputed
+// leaf hashes.
+type CachedSubtreeHasher struct {
+	leafHashes [][]byte
+	h          hash.Hash
+}
+
+// NextSubtreeRoot implements SubtreeHasher.
+func (csh *CachedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	if len(csh.leafHashes) == 0 {
+		return nil, io.EOF
+	}
+	tree := New(csh.h)
+	for i := 0; i < subtreeSize && len(csh.leafHashes) > 0; i++ {
+		tree.PushSubTree(0, csh.leafHashes[0])
+		csh.leafHashes = csh.leafHashes[1:]
+	}
+	return tree.Root(), nil
+}
+
+// Skip implements SubtreeHasher.
+func (csh *CachedSubtreeHasher) Skip(n int) error {
+	if n > len(csh.leafHashes) {
+		return io.ErrUnexpectedEOF
+	}
+	csh.leafHashes = csh.leafHashes[n:]
+	return nil
+}
+
+// NewCachedSubtreeHasher creates a CachedSubtreeHasher using the specified
+// leaf hashes and hash function.
+func NewCachedSubtreeHasher(leafHashes [][]byte, h hash.Hash) *CachedSubtreeHasher {
+	return &CachedSubtreeHasher{
+		leafHashes: leafHashes,
+		h:          h,
 	}
 }
 
@@ -162,10 +205,7 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte,
 
 	// skip leaves within proof range
 	if err := h.Skip(proofEnd - proofStart); err != nil {
-		// ignore EOF errors
-		if err != io.EOF && err != io.ErrUnexpectedEOF {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	// add proof hashes from proofEnd onward, stopping when NextSubtreeRoot
@@ -183,24 +223,75 @@ func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte,
 			proof = append(proof, root)
 		}
 	}
+
 	return proof, nil
 }
 
-// BuildReaderRangeProof constructs a proof for the range [proofStart,
-// proofEnd), using leaf data read from r.
-func BuildReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proofEnd int) ([][]byte, error) {
-	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
-		panic("BuildReaderRangeProof: illegal proof range")
-	}
-	return BuildRangeProof(proofStart, proofEnd, NewSubtreeReader(r, leafSize, h))
+// A LeafHasher returns the leaves of a Merkle tree in sequential order. When
+// no more leaves are available, NextLeafHash must return io.EOF.
+type LeafHasher interface {
+	NextLeafHash() ([]byte, error)
 }
 
-// VerifyReaderRangeProof verifies a proof produced by BuildRangeProof, using
-// leaf data read from r, which must contain only the leaves within the proof
-// range.
-func VerifyReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proofEnd int, proof [][]byte, root []byte) (bool, error) {
+// ReaderLeafHasher implements the LeafHasher interface by reading leaf data
+// from the underlying stream.
+type ReaderLeafHasher struct {
+	r    io.Reader
+	h    hash.Hash
+	leaf []byte
+}
+
+// NextLeafHash implements LeafHasher.
+func (rlh *ReaderLeafHasher) NextLeafHash() ([]byte, error) {
+	n, err := io.ReadFull(rlh.r, rlh.leaf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, err
+	} else if n == 0 {
+		return nil, io.EOF
+	}
+	return leafSum(rlh.h, rlh.leaf[:n]), nil
+}
+
+// NewReaderLeafHasher creates a ReaderLeafHasher with the specified stream,
+// hash, and leaf size.
+func NewReaderLeafHasher(r io.Reader, h hash.Hash, leafSize int) *ReaderLeafHasher {
+	return &ReaderLeafHasher{
+		r:    r,
+		h:    h,
+		leaf: make([]byte, leafSize),
+	}
+}
+
+// CachedLeafHasher implements the LeafHasher interface by returning
+// precomputed leaf hashes.
+type CachedLeafHasher struct {
+	leafHashes [][]byte
+}
+
+// NextLeafHash implements LeafHasher.
+func (clh *CachedLeafHasher) NextLeafHash() ([]byte, error) {
+	if len(clh.leafHashes) == 0 {
+		return nil, io.EOF
+	}
+	h := clh.leafHashes[0]
+	clh.leafHashes = clh.leafHashes[1:]
+	return h, nil
+}
+
+// NewCachedLeafHasher creates a CachedLeafHasher from a set of precomputed
+// leaf hashes.
+func NewCachedLeafHasher(leafHashes [][]byte) *CachedLeafHasher {
+	return &CachedLeafHasher{
+		leafHashes: leafHashes,
+	}
+}
+
+// VerifyRangeProof verifies a proof produced by BuildRangeProof using leaf
+// hashes produced by lh, which must contain only the leaf hashes within the
+// proof range.
+func VerifyRangeProof(lh LeafHasher, h hash.Hash, proofStart, proofEnd int, proof [][]byte, root []byte) (bool, error) {
 	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
-		panic("VerifyReaderRangeProof: illegal proof range")
+		panic("VerifyRangeProof: illegal proof range")
 	}
 
 	// manually build a tree using the proof hashes
@@ -221,19 +312,15 @@ func VerifyReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proo
 	}
 
 	// add leaf hashes
-	leaf := make([]byte, leafSize)
-	for i := proofStart; i < proofEnd; i++ {
-		n, err := io.ReadFull(r, leaf)
-		if n > 0 {
-			tree.Push(leaf[:n])
-		}
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			if i == proofEnd-1 {
-				break // last leaf was partial
-			}
-			return false, errors.New("insufficient leaf data in reader")
+	for {
+		leafHash, err := lh.NextLeafHash()
+		if err == io.EOF {
+			break
 		} else if err != nil {
 			return false, err
+		}
+		if err := tree.PushSubTree(0, leafHash); err != nil {
+			panic(err)
 		}
 	}
 
@@ -253,13 +340,4 @@ func VerifyReaderRangeProof(r io.Reader, h hash.Hash, leafSize, proofStart, proo
 	}
 
 	return bytes.Equal(tree.Root(), root), nil
-}
-
-// VerifyRangeProof verifies a proof produced by BuildRangeProof.
-func VerifyRangeProof(leafData []byte, h hash.Hash, leafSize, proofStart, proofEnd int, proof [][]byte, root []byte) bool {
-	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
-		panic("VerifyRangeProof: illegal proof range")
-	}
-	ok, err := VerifyReaderRangeProof(bytes.NewReader(leafData), h, leafSize, proofStart, proofEnd, proof, root)
-	return ok && err == nil
 }
