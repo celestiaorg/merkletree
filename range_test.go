@@ -318,7 +318,7 @@ func TestBuildProofRangeEOF(t *testing.T) {
 		NewReaderSubtreeHasher(bytes.NewReader(leafData[:len(leafData)/2]), leafSize, blake),
 		NewCachedSubtreeHasher(leafHashes[:len(leafHashes)/2], blake),
 	}
-	for i, sh := range shs {
+	for _, sh := range shs {
 		if _, err := BuildRangeProof(midl, midr, sh); err != io.ErrUnexpectedEOF {
 			t.Fatal("expected io.ErrUnexpectedEOF, got", err)
 		}

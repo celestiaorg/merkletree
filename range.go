@@ -54,17 +54,15 @@ func (rsh *ReaderSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error)
 // Skip implements SubtreeHasher.
 func (rsh *ReaderSubtreeHasher) Skip(n int) (err error) {
 	skipSize := int64(len(rsh.leaf) * n)
-	var skipped int64
-	if s, ok := rsh.r.(io.Seeker); ok {
-		skipped, err = s.Seek(skipSize, io.SeekCurrent)
-	} else {
-		// fake a seek method
-		skipped, err = io.CopyN(ioutil.Discard, rsh.r, skipSize)
+	skipped, err := io.CopyN(ioutil.Discard, rsh.r, skipSize)
+	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		if skipped == skipSize {
+			return nil
+		} else {
+			return io.ErrUnexpectedEOF
+		}
 	}
-	if skipped != skipSize {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
+	return err
 }
 
 // NewReaderSubtreeHasher returns a new ReaderSubtreeHasher that reads leaf data from r.
