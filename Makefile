@@ -8,19 +8,23 @@ dependencies:
 	go get -u github.com/dvyukov/go-fuzz/go-fuzz-build
 	go get -u gitlab.com/NebulousLabs/fastrand
 	go get -u gitlab.com/NebulousLabs/errors
+	go get -u github.com/alecthomas/gometalinter
+	gometalinter --install
 
 install: REBUILD
 	go install
 
+lint:
+	gometalinter --disable-all --enable=errcheck --enable=vet --enable=gofmt ./...
+
 test: REBUILD
 	go test -v -tags='debug' -timeout=600s
+
 test-short: REBUILD
 	go test -short -v -tags='debug' -timeout=6s
 
 cover: REBUILD
-	go test -v -tags='debug' -cover -coverprofile=cover.out
-	go tool cover -html=cover.out -o=cover.html
-	rm cover.out
+	go test -coverprofile=coverage.out -v -race -tags='debug' ./...
 
 fuzz: REBUILD
 	go install -tags='debug gofuzz'
