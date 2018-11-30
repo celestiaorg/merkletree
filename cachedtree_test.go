@@ -32,14 +32,14 @@ func addSubTree(height uint64, dataSeed []byte, subtreeProveIndex uint64, fullTr
 // lengths.
 func TestCachedTreeConstruction(t *testing.T) {
 	arbData := [][]byte{
-		[]byte{1},
-		[]byte{2},
-		[]byte{3},
-		[]byte{4},
-		[]byte{5},
-		[]byte{6},
-		[]byte{7},
-		[]byte{8},
+		{1},
+		{2},
+		{3},
+		{4},
+		{5},
+		{6},
+		{7},
+		{8},
 	}
 
 	// Test that a CachedTree with no elements will return the same value as a

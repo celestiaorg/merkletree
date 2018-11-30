@@ -58,9 +58,8 @@ func (rsh *ReaderSubtreeHasher) Skip(n int) (err error) {
 	if err == io.EOF || err == io.ErrUnexpectedEOF {
 		if skipped == skipSize {
 			return nil
-		} else {
-			return io.ErrUnexpectedEOF
 		}
+		return io.ErrUnexpectedEOF
 	}
 	return err
 }
@@ -88,7 +87,9 @@ func (csh *CachedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error)
 	}
 	tree := New(csh.h)
 	for i := 0; i < subtreeSize && len(csh.leafHashes) > 0; i++ {
-		tree.PushSubTree(0, csh.leafHashes[0])
+		if err := tree.PushSubTree(0, csh.leafHashes[0]); err != nil {
+			return nil, err
+		}
 		csh.leafHashes = csh.leafHashes[1:]
 	}
 	return tree.Root(), nil
