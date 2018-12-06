@@ -325,6 +325,59 @@ func TestBuildProofRangeEOF(t *testing.T) {
 	}
 }
 
+// TestProofConversion tests that "old" single-leaf Merkle proofs can be
+// converted into "new" single-leaf Merkle range proofs, and vice versa.
+func TestProofConversion(t *testing.T) {
+	blake, _ := blake2b.New256(nil)
+	const leafSize = 64
+	const numLeaves = 11
+	leafData := fastrand.Bytes(leafSize * numLeaves)
+
+	buildOldProof := func(proofIndex int) [][]byte {
+		t := New(blake)
+		t.SetIndex(uint64(proofIndex))
+		buf := bytes.NewBuffer(leafData)
+		for buf.Len() > 0 {
+			t.Push(buf.Next(leafSize))
+		}
+		_, proof, _, _ := t.Prove()
+		return proof[1:]
+	}
+
+	buildNewProof := func(proofIndex int) [][]byte {
+		sh := NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake)
+		proof, err := BuildRangeProof(proofIndex, proofIndex+1, sh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return proof
+	}
+
+	for proofIndex := 0; proofIndex < numLeaves; proofIndex++ {
+		oldproof := buildOldProof(proofIndex)
+		newproof := buildNewProof(proofIndex)
+		if !reflect.DeepEqual(ConvertSingleProofToRangeProof(oldproof, proofIndex), newproof) {
+			t.Fatalf("Failed to convert old->new for index %v", proofIndex)
+		}
+		if !reflect.DeepEqual(ConvertRangeProofToSingleProof(newproof, proofIndex), oldproof) {
+			t.Errorf("Failed to convert new->old for index %v", proofIndex)
+		}
+	}
+
+	// test invalid/untrusted inputs
+	proof := make([][]byte, 1000)
+	for i := 0; i < 1000; i++ {
+		proof = proof[:1+fastrand.Intn(1000)]
+		proofIndex := fastrand.Intn(len(proof))
+		if fastrand.Intn(4) == 0 {
+			// 25% of the time, use a ridiculous proof index
+			proofIndex = len(proof) + fastrand.Intn(1000)
+		}
+		ConvertRangeProofToSingleProof(proof, proofIndex)
+		ConvertRangeProofToSingleProof(proof, proofIndex)
+	}
+}
+
 // BenchmarkBuildRangeProof benchmarks the performance of BuildRangeProof for
 // various proof ranges.
 func BenchmarkBuildRangeProof(b *testing.B) {
