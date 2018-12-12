@@ -343,7 +343,8 @@ func VerifyRangeProof(lh LeafHasher, h hash.Hash, proofStart, proofEnd int, proo
 }
 
 // proofMapping returns an index-to-index mapping that maps a hash's index in
-// a "new" proof to its index in an "old" proof, i.e. new[i] = old[m[i]].
+// a "new" proof (produced by BuildRangeProof) to its index in an "old" proof
+// (produced by (*Tree).Prove), i.e. new[i] = old[m[i]].
 func proofMapping(proofSize, proofIndex int) (mapping []int) {
 	// For context, the problem we're solving is that (*Tree).Prove constructs
 	// proofs in a different way than the newer range proofs for a single
