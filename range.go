@@ -5,6 +5,7 @@ import (
 	"hash"
 	"io"
 	"io/ioutil"
+	"math/bits"
 )
 
 // A SubtreeHasher calculates subtree roots in sequential order, for use with
@@ -339,4 +340,96 @@ func VerifyRangeProof(lh LeafHasher, h hash.Hash, proofStart, proofEnd int, proo
 	}
 
 	return bytes.Equal(tree.Root(), root), nil
+}
+
+// proofMapping returns an index-to-index mapping that maps a hash's index in
+// a "new" proof (produced by BuildRangeProof) to its index in an "old" proof
+// (produced by (*Tree).Prove), i.e. new[i] = old[m[i]].
+func proofMapping(proofSize, proofIndex int) (mapping []int) {
+	// For context, the problem we're solving is that (*Tree).Prove constructs
+	// proofs in a different way than the newer range proofs for a single
+	// leaf. The proof hashes themselves are the same, of course, but the
+	// *order* in which they appear in the proof is different. For example, in
+	// the tree below, the two orderings of a proof for index 3 are:
+	//
+	//                       ┌─────────┴───────*
+	//                 *─────┴─────┐           │
+	//              ┌──┴──┐     *──┴──┐     ┌──┴──┐
+	// Index:       0     1     2     3     4     5
+	// Old Proof:      1        0              2
+	// New Proof:      0        1              2
+	//
+	// In other words, the old proofs proceed "bottom-up", tracing the path
+	// from the proofIndex to the root of the tree, whereas the new proofs
+	// proceed "left-to-right."
+	//
+	// There is a simple algorithm for converting old proofs to new proofs.
+	// First, we iterate through the bits of the proofIndex; if the i'th bit
+	// is a 0, we add to the "right-side" hashes; if it's a 1, we add it to
+	// the "left-side". Then we just need to reverse the order of the left-
+	// side hashes (see the comment in BuildRangeProof) and concatenate the
+	// left side with the right side.
+	//
+	// Unfortunately, this algorithm only works for balanced trees (trees with
+	// 2^n leaves). Consider a proof for index 4 in the above tree. The actual
+	// proof should contain only two hashes, but the naive algorithm would
+	// generate three -- one for each level. More specifically: the bits of 4
+	// are 001, so the algorithm would see "right-side, right-side, left-
+	// side." But after the first "right-side", there are no more leaves left
+	// on the right side!
+	//
+	// So we have to augment the algorithm to be aware of these "missing
+	// levels." Fortunately, we can exploit a property of unbalanced trees to
+	// accomplish this without too much trouble. The property is: if a proof
+	// is missing n hashes, they are always the hashes of the n largest right-
+	// side subtrees. Or, stated another way: the proof will only include the
+	// m *smallest* right-side subtrees. For example, we know that the proof
+	// for index 4 contains only one right-side subtree hash; using the
+	// property, we can be confident that the hash is of a single leaf.
+	//
+	// This lends itself to an easy change to the algorithm: simply stop
+	// adding right-side hashes after we've hit the known limit. But how do we
+	// know what the limit is? Easy: we know that there's a 1 bit in the
+	// proofIndex for each left-side hash, so we just subtract the number of 1
+	// bits from the total number of proof hashes.
+	numRights := proofSize - bits.OnesCount(uint(proofIndex))
+	var left, right []int
+	for i := 0; len(left)+len(right) < proofSize; i++ {
+		subtreeSize := 1 << uint64(i)
+		if proofIndex&subtreeSize != 0 {
+			// appending len(left)+len(right) is a little trick to ensure
+			// that, whether we append to left or right, the combined sequence
+			// is 0,1,2,3...
+			left = append(left, len(left)+len(right))
+		} else if len(right) < numRights {
+			right = append(right, len(left)+len(right))
+		}
+	}
+	// left-side needs to be reversed
+	for i := range left {
+		mapping = append(mapping, left[len(left)-i-1])
+	}
+	return append(mapping, right...)
+}
+
+// ConvertSingleProofToRangeProof converts a proof produced by (*Tree).Prove
+// to a single-leaf range proof. proofIndex must be >= 0.
+func ConvertSingleProofToRangeProof(proof [][]byte, proofIndex int) [][]byte {
+	newproof := make([][]byte, len(proof))
+	mapping := proofMapping(len(proof), proofIndex)
+	for i, j := range mapping {
+		newproof[i] = proof[j]
+	}
+	return newproof
+}
+
+// ConvertRangeProofToSingleProof converts a single-leaf range proof to the
+// equivalent proof produced by (*Tree).Prove. proofIndex must be >= 0.
+func ConvertRangeProofToSingleProof(proof [][]byte, proofIndex int) [][]byte {
+	oldproof := make([][]byte, len(proof))
+	mapping := proofMapping(len(proof), proofIndex)
+	for i, j := range mapping {
+		oldproof[j] = proof[i]
+	}
+	return oldproof
 }

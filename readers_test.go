@@ -53,7 +53,7 @@ func TestReaderRootPadding(t *testing.T) {
 
 // TestBuildReaderProof calls BuildReaderProof on a manually crafted dataset
 // and checks the output.
-func TestBuilReaderProof(t *testing.T) {
+func TestBuildReaderProof(t *testing.T) {
 	mt := CreateMerkleTester(t)
 	bytes7 := []byte{0, 1, 2, 3, 4, 5, 6}
 	reader := bytes.NewReader(bytes7)
