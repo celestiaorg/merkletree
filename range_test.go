@@ -3,6 +3,7 @@ package merkletree
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"hash"
 	"io"
 	"reflect"
@@ -65,7 +66,377 @@ func newPrecalcSubtreeHasher(precalc [][]byte, subtreeSize int, h hash.Hash, sh 
 	}
 }
 
-// testBuildVerifyRangeProof tests the BuildRangeProof and VerifyRangeProof
+// TestNextSubtreeSize tests the nextSubtreeSize helper function.
+func TestNextSubtreeSize(t *testing.T) {
+	tests := []struct {
+		start, end uint64
+		size       int
+	}{
+		{0, 1, 1},
+		{0, 2, 2},
+		{0, 3, 2},
+		{0, 100, 64},
+
+		{1, 2, 1},
+		{1, 3, 1},
+		{1, 4, 1},
+		{1, 100, 1},
+
+		{2, 3, 1},
+		{2, 4, 2},
+		{2, 5, 2},
+		{2, 100, 2},
+
+		{3, 4, 1},
+		{3, 5, 1},
+		{3, 6, 1},
+		{3, 100, 1},
+
+		{4, 5, 1},
+		{4, 6, 2},
+		{4, 7, 2},
+		{4, 8, 4},
+		{4, 100, 4},
+
+		{6, 7, 1},
+		{6, 8, 2},
+		{6, 9, 2},
+		{6, 100, 2},
+
+		{8, 9, 1},
+		{8, 10, 2},
+		{8, 12, 4},
+		{8, 15, 4},
+		{8, 16, 8},
+		{8, 100, 8},
+	}
+	for _, test := range tests {
+		if size := nextSubtreeSize(test.start, test.end); size != test.size {
+			t.Errorf("expected %v,%v -> %v; got %v", test.start, test.end, test.size, size)
+		}
+	}
+}
+
+// A mockSubtreeHasher records the calls made to it while returning nil hashes.
+type mockSubtreeHasher struct {
+	leaves int
+	pos    int
+	calls  []string
+}
+
+func (msh *mockSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	msh.calls = append(msh.calls, fmt.Sprintf("Keep [%v,%v)", msh.pos, msh.pos+subtreeSize))
+	if msh.pos >= msh.leaves {
+		return nil, io.EOF
+	}
+	msh.pos += subtreeSize
+	return nil, nil
+}
+
+func (msh *mockSubtreeHasher) Skip(n int) error {
+	msh.calls = append(msh.calls, fmt.Sprintf("Skip [%v,%v)", msh.pos, msh.pos+n))
+	msh.pos += n
+	if msh.pos > msh.leaves {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+
+// TestBuildMultiRangeProof uses a mock SubtreeHasher to test whether
+// BuildMultiRange proof is examining the correct ranges of the tree.
+func TestBuildMultiRangeProof(t *testing.T) {
+	tests := []struct {
+		leaves int
+		ranges []LeafRange
+		calls  []string
+	}{
+
+		//       ┌──┴───*
+		//    *──┴──┐   │
+		//  ┌─┴─┐ *─┴─┐ │
+		//  0   1 2   3 4
+		//            ^
+		{
+			leaves: 5,
+			ranges: []LeafRange{{3, 4}},
+			calls: []string{
+				"Keep [0,2)",
+				"Keep [2,3)",
+				"Skip [3,4)",
+				"Keep [4,8)",
+				"Keep [8,16)", // overshoot -- algorithm terminates here
+			},
+		},
+
+		//       ┌──┴───*
+		//    *──┴──┐   │
+		//  ┌─┴─┐ ┌─┴─* │
+		//  0   1 2   3 4
+		//        ^
+		{
+			leaves: 5,
+			ranges: []LeafRange{{2, 3}},
+			calls: []string{
+				"Keep [0,2)",
+				"Skip [2,3)",
+				"Keep [3,4)",
+				"Keep [4,8)",
+				"Keep [8,16)",
+			},
+		},
+
+		//       ┌──┴───┐
+		//    ┌──┴──*   │
+		//  ┌─┴─* ┌─┴─┐ │
+		//  0   1 2   3 4
+		//  ^           ^
+		{
+			leaves: 5,
+			ranges: []LeafRange{{0, 1}, {4, 5}},
+			calls: []string{
+				"Skip [0,1)",
+				"Keep [1,2)",
+				"Keep [2,4)",
+				"Skip [4,5)",
+				"Keep [5,6)",
+			},
+		},
+
+		//               ┌────────┴────────┐
+		//         ┌─────┴─────┐           │
+		//      *──┴──┐     ┌──┴──┐     ┌──┴──┐
+		//    ┌─┴─┐ *─┴─┐ ┌─┴─* *─┴─┐ ┌─┴─┐ ┌─┴─*
+		//    0   1 2   3 4   5 6   7 8   9 10  11
+		//              ^^^         ^^^^^^^^^
+		{
+			leaves: 12,
+			ranges: []LeafRange{{3, 5}, {7, 11}},
+			calls: []string{
+				"Keep [0,2)",
+				"Keep [2,3)",
+				"Skip [3,5)",
+				"Keep [5,6)",
+				"Keep [6,7)",
+				"Skip [7,11)",
+				"Keep [11,12)",
+				"Keep [12,16)",
+			},
+		},
+
+		//               ┌────────┴────────*
+		//         ┌─────┴─────*           │
+		//      ┌──┴──┐     ┌──┴──┐     ┌──┴──┐
+		//    ┌─┴─┐ ┌─┴─┐ ┌─┴─┐ ┌─┴─┐ ┌─┴─┐ ┌─┴─┐
+		//    0   1 2   3 4   5 6   7 8   9 10  11
+		//    ^^^^^ ^   ^
+		{
+			leaves: 12,
+			ranges: []LeafRange{{0, 2}, {2, 3}, {3, 4}},
+			calls: []string{
+				"Skip [0,2)",
+				"Skip [2,3)",
+				"Skip [3,4)",
+				"Keep [4,8)",
+				"Keep [8,16)",
+				"Keep [16,32)",
+			},
+		},
+	}
+	for _, test := range tests {
+		m := &mockSubtreeHasher{leaves: test.leaves}
+		if _, err := BuildMultiRangeProof(test.ranges, m); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(m.calls, test.calls) {
+			t.Errorf("BuildMultiRangeProof made incorrect calls to SubtreeHasher:\nExpected:\n\t%v\nGot:\n\t%v", test.calls, m.calls)
+		}
+	}
+}
+
+// TestBuildVerifyMultiRangeProof tests the BuildMultiRangeProof and
+// VerifyMultiRangeProof functions.
+func TestBuildVerifyMultiRangeProof(t *testing.T) {
+	// setup proof parameters
+	const dataSize = 1 << 22
+	const leafSize = 64
+	const numLeaves = dataSize / leafSize
+	blake, _ := blake2b.New256(nil)
+	leafData := make([]byte, 1<<22)
+	leafHashes := make([][]byte, numLeaves)
+	for i := range leafHashes {
+		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+	}
+	root := bytesRoot(leafData, blake, leafSize)
+
+	// convenience functions
+	nodeHash := func(left, right []byte) []byte {
+		return nodeSum(blake, left, right)
+	}
+	buildProof := func(ranges []LeafRange) [][]byte {
+		// flip a coin to decide whether to use leaf data or leaf hashes
+		var sh SubtreeHasher
+		if fastrand.Intn(2) == 0 {
+			sh = NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake)
+		} else {
+			sh = NewCachedSubtreeHasher(leafHashes, blake)
+		}
+		proof, err := BuildMultiRangeProof(ranges, sh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return proof
+	}
+	verifyProof := func(ranges []LeafRange, proof [][]byte) bool {
+		// flip a coin to decide whether to use leaf data or leaf hashes
+		var lh LeafHasher
+		if fastrand.Intn(2) == 0 {
+			var rs []io.Reader
+			for _, r := range ranges {
+				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
+			}
+			lh = NewReaderLeafHasher(io.MultiReader(rs...), blake, leafSize)
+		} else {
+			var hashes [][]byte
+			for _, r := range ranges {
+				hashes = append(hashes, leafHashes[r.Start:r.End]...)
+			}
+			lh = NewCachedLeafHasher(hashes)
+		}
+		ok, err := VerifyMultiRangeProof(lh, blake, ranges, proof, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+
+	// test some known proofs
+	proofRange := []LeafRange{
+		{0, 1},
+		{1, 2},
+		{2, numLeaves},
+	}
+	proof := buildProof(proofRange)
+	if len(proof) != 0 {
+		t.Error("BuildRangeProof constructed an incorrect proof for the entire sector")
+	}
+
+	proofRange = []LeafRange{
+		{0, 1},
+		{numLeaves - 1, numLeaves},
+	}
+	proof = buildProof(proofRange)
+	leftSide := leafHashes[0]
+	rightSide := leafHashes[numLeaves-1]
+	for i := range proof[:len(proof)/2] {
+		leftSide = nodeHash(leftSide, proof[i])
+		rightSide = nodeHash(proof[len(proof)-i-1], rightSide)
+	}
+	checkRoot := nodeHash(leftSide, rightSide)
+	if hex.EncodeToString(checkRoot) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
+		t.Error("BuildRangeProof constructed an incorrect proof for the first leaf")
+	} else if !verifyProof(proofRange, proof) {
+		t.Error("VerifyRangeProof failed to verify a known correct proof")
+	}
+
+	proofRange = []LeafRange{
+		{0, 1},
+		{numLeaves / 2, numLeaves/2 + 1},
+	}
+	proof = buildProof(proofRange)
+	leftSide = leafHashes[0]
+	for _, h := range proof[:len(proof)/2] {
+		leftSide = nodeHash(leftSide, h)
+	}
+	rightSide = leafHashes[numLeaves/2]
+	for _, h := range proof[:len(proof)/2] {
+		rightSide = nodeHash(rightSide, h)
+	}
+	checkRoot = nodeHash(leftSide, rightSide)
+	if hex.EncodeToString(checkRoot) != "50ed59cecd5ed3ca9e65cec0797202091dbba45272dafa3faa4e27064eedd52c" {
+		t.Error("BuildRangeProof constructed an incorrect proof for the first leaf")
+	} else if !verifyProof(proofRange, proof) {
+		t.Error("VerifyRangeProof failed to verify a known correct proof")
+	}
+
+	// this is the largest possible proof
+	proofRange = nil
+	for i := uint64(0); i < numLeaves; i += 2 {
+		proofRange = append(proofRange, LeafRange{i, i + 1})
+	}
+	proof = buildProof(proofRange)
+	for i := range proof {
+		if !bytes.Equal(proof[i], leafHashes[2*i]) {
+			t.Error("BuildRangeProof constructed an incorrect proof for worst-case inputs")
+			break
+		}
+	}
+	if !verifyProof(proofRange, proof) {
+		t.Error("VerifyRangeProof failed to verify a known correct proof")
+	}
+
+	// for more intensive testing, use smaller trees
+	buildSmallProof := func(ranges []LeafRange, nLeaves int) [][]byte {
+		// flip a coin to decide whether to use leaf data or leaf hashes
+		var sh SubtreeHasher
+		if fastrand.Intn(2) == 0 {
+			sh = NewReaderSubtreeHasher(bytes.NewReader(leafData[:leafSize*nLeaves]), leafSize, blake)
+		} else {
+			sh = NewCachedSubtreeHasher(leafHashes[:nLeaves], blake)
+		}
+		proof, err := BuildMultiRangeProof(ranges, sh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return proof
+	}
+	verifySmallProof := func(ranges []LeafRange, proof [][]byte, nLeaves int) bool {
+		// flip a coin to decide whether to use leaf data or leaf hashes
+		var lh LeafHasher
+		if fastrand.Intn(2) == 0 {
+			var rs []io.Reader
+			for _, r := range ranges {
+				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
+			}
+			lh = NewReaderLeafHasher(io.MultiReader(rs...), blake, leafSize)
+		} else {
+			var hashes [][]byte
+			for _, r := range ranges {
+				hashes = append(hashes, leafHashes[r.Start:r.End]...)
+			}
+			lh = NewCachedLeafHasher(hashes)
+		}
+		smallRoot := bytesRoot(leafData[:leafSize*nLeaves], blake, leafSize)
+		ok, err := VerifyMultiRangeProof(lh, blake, ranges, proof, smallRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+
+	// build and verify all 4180 possible proofs for a 9-leaf tree.
+	var allRangeSets func(min, max uint64) [][]LeafRange
+	allRangeSets = func(min, max uint64) [][]LeafRange {
+		var all [][]LeafRange
+		for i := min; i < max; i++ {
+			for j := i + 1; j <= max; j++ {
+				all = append(all, []LeafRange{{i, j}})
+				for _, sub := range allRangeSets(j, max) {
+					withPrefix := append([]LeafRange{{i, j}}, sub...)
+					all = append(all, withPrefix)
+				}
+			}
+		}
+		return all
+	}
+	for _, rs := range allRangeSets(0, 9) {
+		proof := buildSmallProof(rs, 9)
+		if !verifySmallProof(rs, proof, 9) {
+			t.Errorf("BuildMultiRangeProof constructed an incorrect proof for ranges %v", rs)
+		}
+	}
+}
+
+// TestBuildVerifyRangeProof tests the BuildRangeProof and VerifyRangeProof
 // functions.
 func TestBuildVerifyRangeProof(t *testing.T) {
 	// setup proof parameters
@@ -99,7 +470,6 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 			t.Fatal(err)
 		}
 		return proof
-
 	}
 	verifyProof := func(start, end int, proof [][]byte) bool {
 		// flip a coin to decide whether to use leaf data or leaf hashes
