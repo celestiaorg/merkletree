@@ -762,6 +762,89 @@ func TestProofConversion(t *testing.T) {
 	}
 }
 
+// TestProofOfModification uses multi-range proofs to prove arbitrary
+// modifications to a Merkle tree.
+func TestProofOfModification(t *testing.T) {
+	const leafSize = 64
+	const numLeaves = 12
+	const dataSize = leafSize * numLeaves
+	blake, _ := blake2b.New256(nil)
+	leafData := fastrand.Bytes(dataSize)
+	leafHashes := make([][]byte, numLeaves)
+	for i := range leafHashes {
+		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+	}
+	root := bytesRoot(leafData, blake, leafSize)
+
+	// The modifications we want to make are:
+	//
+	// - Swap(6,11)
+	// - Trim(6)
+	// - Swap(7, 10)
+	// - Append(12)
+	// - Append(13)
+	//
+	// Using these appended hashes:
+	newLeafHash12 := fastrand.Bytes(32)
+	newLeafHash13 := fastrand.Bytes(32)
+
+	// We begin by constructing a multi-range proof for the old tree, covering
+	// any affected leaves.
+	ranges := []LeafRange{
+		{6, 7},
+		{7, 8},
+		{10, 11},
+		{11, 12},
+	}
+	proof, err := BuildMultiRangeProof(ranges, NewCachedSubtreeHasher(leafHashes, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// We complete the proof by appending the leaves inside the ranges:
+	proof = append(proof, leafHashes[6], leafHashes[7], leafHashes[10], leafHashes[11])
+
+	// Then we apply the modifications and construct the new root:
+	leafHashes[6], leafHashes[11] = leafHashes[11], leafHashes[6] // Swap(6, 11)
+	leafHashes = leafHashes[:len(leafHashes)-1]                   // Trim(6)
+	leafHashes[7], leafHashes[10] = leafHashes[10], leafHashes[7] // Swap(7, 10)
+	leafHashes = append(leafHashes, newLeafHash12)                // Append(12)
+	leafHashes = append(leafHashes, newLeafHash13)                // Append(13)
+	newRoot, err := NewCachedSubtreeHasher(leafHashes, blake).NextSubtreeRoot(len(leafHashes))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The proof and the new root are sent to the verifier. The verifier also
+	// knows newLeafHash12 and newLeafHash13.
+
+	// To verify the proof, we first split the proof into subtree hashes and leaf hashes:
+	var numRangeHashes int
+	for _, r := range ranges {
+		numRangeHashes += int(r.End - r.Start)
+	}
+	proofHashes, rangeHashes := proof[:len(proof)-numRangeHashes], proof[len(proof)-numRangeHashes:]
+	ok, err := VerifyMultiRangeProof(NewCachedLeafHasher(rangeHashes), blake, ranges, proofHashes, root)
+	if err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("failed to verify old root")
+	}
+
+	// Next, we apply the modifications to our hashes and verify the new root:
+	rangeHashes[0], rangeHashes[3] = rangeHashes[3], rangeHashes[0] // Swap(6, 11)
+	rangeHashes = rangeHashes[:len(rangeHashes)-1]                  // Trim(6)
+	rangeHashes[1], rangeHashes[2] = rangeHashes[2], rangeHashes[1] // Swap(7, 10)
+	rangeHashes = append(rangeHashes, newLeafHash12)                // Append(12)
+	rangeHashes = append(rangeHashes, newLeafHash13)                // Append(13)
+	ranges = append(ranges, LeafRange{12, 13})                      // to include appended data
+	ok, err = VerifyMultiRangeProof(NewCachedLeafHasher(rangeHashes), blake, ranges, proofHashes, newRoot)
+	if err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("failed to verify new root")
+	}
+}
+
 // BenchmarkBuildRangeProof benchmarks the performance of BuildRangeProof for
 // various proof ranges.
 func BenchmarkBuildRangeProof(b *testing.B) {
