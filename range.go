@@ -145,8 +145,8 @@ func NewCachedSubtreeHasher(leafHashes [][]byte, h hash.Hash) *CachedSubtreeHash
 	}
 }
 
-// BuildRangeProof constructs a proof for the specified leaf ranges, using the
-// provided SubtreeHasher. The ranges must be sorted and non-overlapping.
+// BuildMultiRangeProof constructs a proof for the specified leaf ranges, using
+// the provided SubtreeHasher. The ranges must be sorted and non-overlapping.
 func BuildMultiRangeProof(ranges []LeafRange, h SubtreeHasher) (proof [][]byte, err error) {
 	if len(ranges) == 0 {
 		return nil, nil
