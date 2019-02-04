@@ -5,6 +5,7 @@ import (
 	"hash"
 	"io"
 	"io/ioutil"
+	"math"
 	"math/bits"
 )
 
@@ -18,7 +19,7 @@ type LeafRange struct {
 // not overlap end.
 func nextSubtreeSize(start, end uint64) int {
 	ideal := bits.TrailingZeros64(start)
-	max := 63 - bits.LeadingZeros64(end-start)
+	max := bits.Len64(end-start) - 1
 	if ideal > max {
 		return 1 << uint(max)
 	}
@@ -154,20 +155,86 @@ func BuildMultiRangeProof(ranges []LeafRange, h SubtreeHasher) (proof [][]byte, 
 		panic("BuildMultiRangeProof: illegal set of proof ranges")
 	}
 
+	// NOTE: this implementation is a bit magical. Essentially, the binary
+	// property of Merkle trees allows us to determine which subtrees are
+	// present in the proof just by looking at the binary representation of the
+	// ranges.
+	//
+	// As an example, imagine we are constructing the following proof:
+	//
+	//               ┌────────┴────────┐
+	//         ┌─────┴─────┐           │
+	//      *──┴──┐     ┌──┴──*     ┌──┴──*
+	//    ┌─┴─┐ *─┴─┐ ┌─┴─* ┌─┴─┐ *─┴─┐ ┌─┴─┐
+	//    0   1 2   3 4   5 6   7 8   9 10  11
+	//              ^^^               ^
+	//
+	// That is, a proof for ranges [3,5) and [9,10). Each * represents a hash
+	// that should be included in the proof. But how do we find these *s?
+	//
+	// The high-level algorithm is as follows. We begin at leaf 0 and repeatedly
+	// consume the largest possible subtree, stopping when we reach the
+	// beginning of the first proof range. We then skip over the proof range,
+	// and continue consuming until we reach the next range. Once all the ranges
+	// have been processed, we finish by repeatedly consuming the largest
+	// possible subtree until the end of the tree is reached.
+	//
+	// A "subtree" here means a set of leaves that comprise a single Merkle
+	// root. In the diagram above, [0,1), [2,4), [0,8), and [11,12) are some of
+	// the valid subtrees. To "consume" a subtree means to include its Merkle
+	// root in the proof and advance past its leaves.
+	//
+	// Let's work through the algorithm for the proof above. We begin by
+	// consuming the largest subtree that does not include leaf 3, which is
+	// [0,2). We then consume the next largest subtree, [2,3). We have arrived
+	// at the boundary of a proof range, so we skip over it, landing on leaf 5.
+	// The largest subtree starting at leaf 5 is [5,6); after that, [6,8). Since
+	// the next proof range begins at leaf 9, the next subtree is [8,9). We skip
+	// over leaf 9 and consume the final subtree, [10,12), completing our proof.
+	//
+	// This appears to work, but one question remains: how do we determine what
+	// the next largest subtree is?
+	//
+	// One thing we might notice is that when we start on an odd-indexed leaf,
+	// e.g. 5, the subtree consists of just that leaf. This is because any other
+	// subtree that includes leaf 5 must also include leaf 4. But since we can
+	// only consume leaf 5 and beyond, we're stuck. Similarly, look at leaf 6.
+	// We can consume leaf 7, forming the subtree [6,8), but any larger subtree
+	// would have to include leaves 4 and 5. Again, we can't "move backwards,"
+	// so the largest subtree has two leaves.
+	//
+	// It turns out that this property can be derived from the binary
+	// representation of the leaf index: specifically, the least-significant 1
+	// bit. Leaf 5, in binary, is 101; the 1 bit at 2^0 tells us that the
+	// largest possible subtree has 2^0 leaves. Likewise, leaf 6 is 110; here,
+	// the least-significant 1 bit is at 2^1, so the largest subtree has 2^1
+	// leaves. Leaf 0, since it has no 1 bits, indicates a subtree of unbounded
+	// size.
+	//
+	// But we have another limiting factor: the location of the next proof
+	// range. So first we calculate the maximum possible subtree size, and then
+	// divide it by 2 until it does not overlap the proof range. This completes
+	// our nextSubtreeSize algorithm, and with it our full proof algorithm.
+
 	var leafIndex uint64
-	for _, r := range ranges {
-		// add proof hashes from leaves [leafIndex, r.Start)
-		for leafIndex != r.Start {
-			// consume the largest subtree that does not overlap r.Start
-			subtreeSize := nextSubtreeSize(leafIndex, r.Start)
+	consumeUntil := func(end uint64) error {
+		for leafIndex != end {
+			subtreeSize := nextSubtreeSize(leafIndex, end)
 			root, err := h.NextSubtreeRoot(subtreeSize)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			proof = append(proof, root)
 			leafIndex += uint64(subtreeSize)
 		}
+		return nil
+	}
 
+	// add proof hashes between proof ranges
+	for _, r := range ranges {
+		if err := consumeUntil(r.Start); err != nil {
+			return nil, err
+		}
 		// skip leaves within proof range
 		if err := h.Skip(int(r.End - r.Start)); err != nil {
 			return nil, err
@@ -175,22 +242,12 @@ func BuildMultiRangeProof(ranges []LeafRange, h SubtreeHasher) (proof [][]byte, 
 		leafIndex += r.End - r.Start
 	}
 
-	// keep adding proof hashes until NextSubtreeRoot returns io.EOF.
-	endMask := leafIndex - 1
-	for i := 0; i < 64; i++ {
-		subtreeSize := uint64(1) << uint64(i)
-		if endMask&subtreeSize == 0 {
-			root, err := h.NextSubtreeRoot(int(subtreeSize))
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			proof = append(proof, root)
-		}
+	// keep adding proof hashes until we reach the end of the tree
+	err = consumeUntil(math.MaxUint64)
+	if err == io.EOF {
+		err = nil // EOF is expected
 	}
-
-	return proof, nil
+	return proof, err
 }
 
 // BuildRangeProof constructs a proof for the leaf range [proofStart,
