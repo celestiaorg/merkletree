@@ -331,24 +331,28 @@ func VerifyMultiRangeProof(lh LeafHasher, h hash.Hash, ranges []LeafRange, proof
 
 	// manually build a tree using the proof hashes
 	tree := New(h)
-
 	var leafIndex uint64
-	for _, r := range ranges {
-		// add proof hashes from leaves [leafIndex, r.Start)
-		for leafIndex != r.Start && len(proof) > 0 {
-			// consume the largest subtree that does not overlap r.Start
-			subtreeSize := nextSubtreeSize(leafIndex, r.Start)
+	consumeUntil := func(end uint64) error {
+		for leafIndex != end && len(proof) > 0 {
+			subtreeSize := nextSubtreeSize(leafIndex, end)
 			i := bits.TrailingZeros64(uint64(subtreeSize)) // log2
 			if err := tree.PushSubTree(i, proof[0]); err != nil {
-				// PushSubTree only returns an error if i is greater than the
-				// current smallest subtree. Since the loop proceeds in
-				// descending order, this should never happen.
-				panic(err)
+				// This *probably* should never happen, but just to guard
+				// against adversarial inputs, return an error instead of
+				// panicking.
+				return err
 			}
 			proof = proof[1:]
 			leafIndex += uint64(subtreeSize)
 		}
+		return nil
+	}
 
+	for _, r := range ranges {
+		// add proof hashes from leaves [leafIndex, r.Start)
+		if err := consumeUntil(r.Start); err != nil {
+			return false, err
+		}
 		// add leaf hashes within the proof range
 		for i := r.Start; i < r.End; i++ {
 			leafHash, err := lh.NextLeafHash()
@@ -363,19 +367,8 @@ func VerifyMultiRangeProof(lh LeafHasher, h hash.Hash, ranges []LeafRange, proof
 	}
 
 	// add remaining proof hashes after the last range ends
-	endMask := leafIndex - 1
-	for i := 0; i < 64 && len(proof) > 0; i++ {
-		subtreeSize := uint64(1) << uint64(i)
-		if endMask&subtreeSize == 0 {
-			if err := tree.PushSubTree(i, proof[0]); err != nil {
-				// This *probably* should never happen, but just to guard
-				// against adversarial inputs, return an error instead of
-				// panicking.
-				return false, err
-			}
-			proof = proof[1:]
-			leafIndex += uint64(subtreeSize)
-		}
+	if err := consumeUntil(math.MaxUint64); err != nil {
+		return false, err
 	}
 
 	return bytes.Equal(tree.Root(), root), nil
