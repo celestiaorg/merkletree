@@ -1048,7 +1048,7 @@ func TestProofOfModification(t *testing.T) {
 	newLeafHash12 := fastrand.Bytes(32)
 	newLeafHash13 := fastrand.Bytes(32)
 
-	// We begin by constructing a multi-range proof for the old tree, covering
+	// We begin by constructing a diff proof for the old tree, covering
 	// any affected leaves.
 	ranges := []LeafRange{
 		{6, 7},
@@ -1122,22 +1122,26 @@ func TestProofOfModificationAppend(t *testing.T) {
 	// The modifications we want to make are:
 	//
 	// - Append(15)
+	// - Swap(3,15)
 	// - Append(16)
 	//
 	// Using these appended hashes:
 	newLeafHash15 := fastrand.Bytes(32)
 	newLeafHash16 := fastrand.Bytes(32)
-	ranges := []LeafRange(nil)
+	ranges := []LeafRange{{3, 4}}
 
-	// We begin by constructing a multi-range proof for the old tree
+	// We begin by constructing a diff proof for the old tree
 	proof, err := BuildDiffProof(ranges, NewCachedSubtreeHasher(leafHashes, blake), numLeaves)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The swapped leaf is also included in the proof
+	proof = append(proof, leafHashes[3])
 
 	// Then we apply the modifications and construct the new root:
-	leafHashes = append(leafHashes, newLeafHash15) // Append(15)
-	leafHashes = append(leafHashes, newLeafHash16) // Append(16)
+	leafHashes = append(leafHashes, newLeafHash15)                // Append(15)
+	leafHashes[3], leafHashes[15] = leafHashes[15], leafHashes[3] // Swap(3,15)
+	leafHashes = append(leafHashes, newLeafHash16)                // Append(16)
 	newRoot, err := NewCachedSubtreeHasher(leafHashes, blake).NextSubtreeRoot(len(leafHashes))
 	if err != nil {
 		t.Fatal(err)
@@ -1145,7 +1149,7 @@ func TestProofOfModificationAppend(t *testing.T) {
 
 	// The proof and the new root are sent to the verifier. The verifier also
 	// knows newLeafHash15 and newLeafHash16.
-	proofHashes, rangeHashes := proof, [][]byte(nil)
+	proofHashes, rangeHashes := proof[:len(proof)-1], proof[len(proof)-1:]
 	ok, err := VerifyDiffProof(NewCachedLeafHasher(rangeHashes), numLeaves, blake, ranges, proofHashes, root)
 	if err != nil {
 		t.Fatal(err)
@@ -1156,8 +1160,68 @@ func TestProofOfModificationAppend(t *testing.T) {
 	// Next, we apply the modifications to our hashes and verify the new root:
 	rangeHashes = append(rangeHashes, newLeafHash15)
 	ranges = append(ranges, LeafRange{15, 16})
+	rangeHashes[0], rangeHashes[1] = rangeHashes[1], rangeHashes[0]
 	rangeHashes = append(rangeHashes, newLeafHash16)
 	ranges = append(ranges, LeafRange{16, 17})
+	ok, err = VerifyDiffProof(NewCachedLeafHasher(rangeHashes), numLeaves, blake, ranges, proofHashes, newRoot)
+	if err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("failed to verify new root")
+	}
+}
+
+// TestProofOfModificationTrim uses diff proofs to prove that data was
+// removed from a Merkle tree.
+func TestProofOfModificationTrim(t *testing.T) {
+	const leafSize = 64
+	const numLeaves = 15
+	const dataSize = leafSize * numLeaves
+	blake, _ := blake2b.New256(nil)
+	leafData := fastrand.Bytes(dataSize)
+	leafHashes := make([][]byte, numLeaves)
+	for i := range leafHashes {
+		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+	}
+	root := bytesRoot(leafData, blake, leafSize)
+
+	// The modifications we want to make are:
+	//
+	// - Swap(3,14)
+	// - Trim(3)
+	// - Trim(13)
+	//
+	ranges := []LeafRange{{3, 4}, {13, 14}, {14, 15}}
+
+	// We begin by constructing a diff proof for the old tree
+	proof, err := BuildDiffProof(ranges, NewCachedSubtreeHasher(leafHashes, blake), numLeaves)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The modified hashes are included in the proof:
+	proof = append(proof, leafHashes[3], leafHashes[13], leafHashes[14])
+
+	// Then we apply the modifications and construct the new root:
+	leafHashes[3], leafHashes[14] = leafHashes[14], leafHashes[3]
+	leafHashes = leafHashes[:numLeaves-2]
+	newRoot, err := NewCachedSubtreeHasher(leafHashes, blake).NextSubtreeRoot(len(leafHashes))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The proof and the new root are sent to the verifier.
+	proofHashes, rangeHashes := proof[:len(proof)-3], proof[len(proof)-3:]
+	ok, err := VerifyDiffProof(NewCachedLeafHasher(rangeHashes), numLeaves, blake, ranges, proofHashes, root)
+	if err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("failed to verify old root")
+	}
+
+	// Next, we apply the modifications to our hashes and verify the new root:
+	rangeHashes[0], rangeHashes[2] = rangeHashes[2], rangeHashes[0]
+	rangeHashes = rangeHashes[:1]
+	ranges = []LeafRange{ranges[0]}
 	ok, err = VerifyDiffProof(NewCachedLeafHasher(rangeHashes), numLeaves, blake, ranges, proofHashes, newRoot)
 	if err != nil {
 		t.Fatal(err)
