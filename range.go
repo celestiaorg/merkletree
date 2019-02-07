@@ -5,8 +5,39 @@ import (
 	"hash"
 	"io"
 	"io/ioutil"
+	"math"
 	"math/bits"
 )
+
+// A LeafRange represents the contiguous set of leaves [Start,End).
+type LeafRange struct {
+	Start uint64
+	End   uint64
+}
+
+// nextSubtreeSize returns the size of the subtree adjacent to start that does
+// not overlap end.
+func nextSubtreeSize(start, end uint64) int {
+	ideal := bits.TrailingZeros64(start)
+	max := bits.Len64(end-start) - 1
+	if ideal > max {
+		return 1 << uint(max)
+	}
+	return 1 << uint(ideal)
+}
+
+// validRangeSet checks whether a set of ranges is sorted and non-overlapping.
+func validRangeSet(ranges []LeafRange) bool {
+	for i, r := range ranges {
+		if r.Start < 0 || r.Start >= r.End {
+			return false
+		}
+		if i > 0 && ranges[i-1].End > r.Start {
+			return false
+		}
+	}
+	return true
+}
 
 // A SubtreeHasher calculates subtree roots in sequential order, for use with
 // BuildRangeProof.
@@ -114,117 +145,118 @@ func NewCachedSubtreeHasher(leafHashes [][]byte, h hash.Hash) *CachedSubtreeHash
 	}
 }
 
+// BuildMultiRangeProof constructs a proof for the specified leaf ranges, using
+// the provided SubtreeHasher. The ranges must be sorted and non-overlapping.
+func BuildMultiRangeProof(ranges []LeafRange, h SubtreeHasher) (proof [][]byte, err error) {
+	if len(ranges) == 0 {
+		return nil, nil
+	}
+	if !validRangeSet(ranges) {
+		panic("BuildMultiRangeProof: illegal set of proof ranges")
+	}
+
+	// NOTE: this implementation is a bit magical. Essentially, the binary
+	// property of Merkle trees allows us to determine which subtrees are
+	// present in the proof just by looking at the binary representation of the
+	// ranges.
+	//
+	// As an example, imagine we are constructing the following proof:
+	//
+	//               ┌────────┴────────┐
+	//         ┌─────┴─────┐           │
+	//      *──┴──┐     ┌──┴──*     ┌──┴──*
+	//    ┌─┴─┐ *─┴─┐ ┌─┴─* ┌─┴─┐ *─┴─┐ ┌─┴─┐
+	//    0   1 2   3 4   5 6   7 8   9 10  11
+	//              ^^^               ^
+	//
+	// That is, a proof for ranges [3,5) and [9,10). Each * represents a hash
+	// that should be included in the proof. But how do we find these *s?
+	//
+	// The high-level algorithm is as follows. We begin at leaf 0 and repeatedly
+	// consume the largest possible subtree, stopping when we reach the
+	// beginning of the first proof range. We then skip over the proof range,
+	// and continue consuming until we reach the next range. Once all the ranges
+	// have been processed, we finish by repeatedly consuming the largest
+	// possible subtree until the end of the tree is reached.
+	//
+	// A "subtree" here means a set of leaves that comprise a single Merkle
+	// root. In the diagram above, [0,1), [2,4), [0,8), and [11,12) are some of
+	// the valid subtrees. To "consume" a subtree means to include its Merkle
+	// root in the proof and advance past its leaves.
+	//
+	// Let's work through the algorithm for the proof above. We begin by
+	// consuming the largest subtree that does not include leaf 3, which is
+	// [0,2). We then consume the next largest subtree, [2,3). We have arrived
+	// at the boundary of a proof range, so we skip over it, landing on leaf 5.
+	// The largest subtree starting at leaf 5 is [5,6); after that, [6,8). Since
+	// the next proof range begins at leaf 9, the next subtree is [8,9). We skip
+	// over leaf 9 and consume the final subtree, [10,12), completing our proof.
+	//
+	// This appears to work, but one question remains: how do we determine what
+	// the next largest subtree is?
+	//
+	// One thing we might notice is that when we start on an odd-indexed leaf,
+	// e.g. 5, the subtree consists of just that leaf. This is because any other
+	// subtree that includes leaf 5 must also include leaf 4. But since we can
+	// only consume leaf 5 and beyond, we're stuck. Similarly, look at leaf 6.
+	// We can consume leaf 7, forming the subtree [6,8), but any larger subtree
+	// would have to include leaves 4 and 5. Again, we can't "move backwards,"
+	// so the largest subtree has two leaves.
+	//
+	// It turns out that this property can be derived from the binary
+	// representation of the leaf index: specifically, the least-significant 1
+	// bit. Leaf 5, in binary, is 101; the 1 bit at 2^0 tells us that the
+	// largest possible subtree has 2^0 leaves. Likewise, leaf 6 is 110; here,
+	// the least-significant 1 bit is at 2^1, so the largest subtree has 2^1
+	// leaves. Leaf 0, since it has no 1 bits, indicates a subtree of unbounded
+	// size.
+	//
+	// But we have another limiting factor: the location of the next proof
+	// range. So first we calculate the maximum possible subtree size, and then
+	// divide it by 2 until it does not overlap the proof range. This completes
+	// our nextSubtreeSize algorithm, and with it our full proof algorithm.
+
+	var leafIndex uint64
+	consumeUntil := func(end uint64) error {
+		for leafIndex != end {
+			subtreeSize := nextSubtreeSize(leafIndex, end)
+			root, err := h.NextSubtreeRoot(subtreeSize)
+			if err != nil {
+				return err
+			}
+			proof = append(proof, root)
+			leafIndex += uint64(subtreeSize)
+		}
+		return nil
+	}
+
+	// add proof hashes between proof ranges
+	for _, r := range ranges {
+		if err := consumeUntil(r.Start); err != nil {
+			return nil, err
+		}
+		// skip leaves within proof range
+		if err := h.Skip(int(r.End - r.Start)); err != nil {
+			return nil, err
+		}
+		leafIndex += r.End - r.Start
+	}
+
+	// keep adding proof hashes until we reach the end of the tree
+	err = consumeUntil(math.MaxUint64)
+	if err == io.EOF {
+		err = nil // EOF is expected
+	}
+	return proof, err
+}
+
 // BuildRangeProof constructs a proof for the leaf range [proofStart,
 // proofEnd) using the provided SubtreeHasher.
 func BuildRangeProof(proofStart, proofEnd int, h SubtreeHasher) (proof [][]byte, err error) {
 	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
 		panic("BuildRangeProof: illegal proof range")
 	}
-
-	// NOTE: this implementation is a bit magical. Essentially, the binary
-	// property of Merkle trees allows us to determine which subtrees are
-	// present in the proof just by looking at the binary representation of
-	// the proofStart and proofEnd integers.
-	//
-	// As an example, imagine we are constructing the following proof:
-	//
-	//               ┌────────┴────────*
-	//         ┌─────┴─────┐           │
-	//      *──┴──┐     ┌──┴──*     ┌──┴──┐
-	//    ┌─┴─┐ *─┴─┐ ┌─┴─* ┌─┴─┐ ┌─┴─┐ ┌─┴─┐
-	//    0   1 2   3 4   5 6   7 8   9 10  11
-	//              ^^^
-	//
-	// That is, proofStart = 3, proofEnd = 5, and there are 12 total leaves.
-	// Each * represents a hash that should be included in the proof. But how
-	// do we find these *s?
-	//
-	// We begin by examining the 1 bits in the binary representation of 3.
-	// There are two 1 bits set, at exponents 1 and 0, which tells us that
-	// there are two subtrees in the first half of the proof: one with 2^1
-	// leaves, and one with 2^0 leaves. So we call NextSubtreeRoot(2) to get
-	// the first proof hash, and NextSubtreeRoot(1) to get the second. The
-	// order is important here: SubtreeHashers are stateful and proceed left-
-	// to-right, so we should examine the bits in big-endian order to ensure
-	// that we process larger subtrees first.
-	//
-	// The SubtreeHasher is now inside the proof range, so we call Skip to
-	// proceed to the subtrees in the second half of the proof.
-	//
-	// We calculate the second half of the proof by examining bits again.
-	// However, instead of looking at the 1 bits in proofStart, we look at the
-	// 0 bits in proofEnd-1. All of the bits are 0 except for 2^2, so we call
-	// NextSubtreeRoot on 2^0, 2^1, 2^3, and 2^4. Again, due to the nature of
-	// the SubtreeHasher, order is important: we proceed in little-endian
-	// order to ensure that we process smaller subtrees first. Finally, when
-	// we attempt to call NextSubtreeRoot(2^4), it returns io.EOF, since we
-	// are past the end of the tree, so the proof is complete.
-	//
-	// Why does this work? Well, it helps to realize that in a binary tree,
-	// the bits of an leaf index describe the *path* from the root of the tree
-	// to that leaf. For example: to reach leaf 2 in the above tree, start at
-	// the top, then go left, left, right, left -- i.e. 0010. Thus, when we
-	// want to construct a Merkle proof for a single leaf, we can use this
-	// path to figure out which subtree hashes to include in the proof. But in
-	// a multi-leaf proof, there are two paths: the path to proofStart, and
-	// the path to proofEnd. So first we look at the path to proofStart, and
-	// throw away all the hashes "to the right" of it, since we know those
-	// will either be inside the proof range or part of the second half of the
-	// proof; then, we look at the path to proofEnd, and do the opposite,
-	// throwing away all the hashes "to the left" of it. That's why we look at
-	// the 1 bits in proofStart, but the 0 bits in proofEnd. Visually:
-	//
-	//               ┌────────┴────────*          This is the Merkle proof for
-	//         ┌─────┴─────*           │          leaf 3. Each "left-side" hash
-	//      *──┴──┐     ┌──┴──┐     ┌──┴──┐       corresponds to a 1 bit in the
-	//    ┌─┴─┐ *─┴─┐ ┌─┴─┐ ┌─┴─┐ ┌─┴─┐ ┌─┴─┐     binary string 1100.
-	//    0   1 2   3 4   5 6   7 8   9 10  11
-	//              ^
-	//
-	//               ┌────────┴────────*          This is the Merkle proof for
-	//         *─────┴─────┐           │          leaf 4. Each "right-side" hash
-	//      ┌──┴──┐     ┌──┴──*     ┌──┴──┐       corresponds to a 0 bit in the
-	//    ┌─┴─┐ ┌─┴─┐ ┌─┴─* ┌─┴─┐ ┌─┴─┐ ┌─┴─┐     binary string 0010.
-	//    0   1 2   3 4   5 6   7 8   9 10  11
-	//                ^
-	//
-	// Combining the "left side" of the first proof with the "right side" of
-	// the second yields the full range proof shown in the first diagram.
-
-	// add proof hashes from leaves [0, proofStart)
-	for i := 63; i >= 0; i-- {
-		subtreeSize := 1 << uint64(i)
-		if proofStart&subtreeSize != 0 {
-			root, err := h.NextSubtreeRoot(subtreeSize)
-			if err != nil {
-				return nil, err
-			}
-			proof = append(proof, root)
-		}
-	}
-
-	// skip leaves within proof range
-	if err := h.Skip(proofEnd - proofStart); err != nil {
-		return nil, err
-	}
-
-	// add proof hashes from proofEnd onward, stopping when NextSubtreeRoot
-	// returns io.EOF.
-	endMask := proofEnd - 1
-	for i := 0; i < 64; i++ {
-		subtreeSize := 1 << uint64(i)
-		if endMask&subtreeSize == 0 {
-			root, err := h.NextSubtreeRoot(int(subtreeSize))
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			proof = append(proof, root)
-		}
-	}
-
-	return proof, nil
+	return BuildMultiRangeProof([]LeafRange{{uint64(proofStart), uint64(proofEnd)}}, h)
 }
 
 // A LeafHasher returns the leaves of a Merkle tree in sequential order. When
@@ -286,6 +318,62 @@ func NewCachedLeafHasher(leafHashes [][]byte) *CachedLeafHasher {
 	}
 }
 
+// VerifyMultiRangeProof verifies a proof produced by BuildMultiRangeProof
+// using leaf hashes produced by lh, which must contain the concatenation of
+// the leaf hashes within the proof ranges.
+func VerifyMultiRangeProof(lh LeafHasher, h hash.Hash, ranges []LeafRange, proof [][]byte, root []byte) (bool, error) {
+	if len(ranges) == 0 {
+		return true, nil
+	}
+	if !validRangeSet(ranges) {
+		panic("BuildMultiRangeProof: illegal set of proof ranges")
+	}
+
+	// manually build a tree using the proof hashes
+	tree := New(h)
+	var leafIndex uint64
+	consumeUntil := func(end uint64) error {
+		for leafIndex != end && len(proof) > 0 {
+			subtreeSize := nextSubtreeSize(leafIndex, end)
+			i := bits.TrailingZeros64(uint64(subtreeSize)) // log2
+			if err := tree.PushSubTree(i, proof[0]); err != nil {
+				// This *probably* should never happen, but just to guard
+				// against adversarial inputs, return an error instead of
+				// panicking.
+				return err
+			}
+			proof = proof[1:]
+			leafIndex += uint64(subtreeSize)
+		}
+		return nil
+	}
+
+	for _, r := range ranges {
+		// add proof hashes from leaves [leafIndex, r.Start)
+		if err := consumeUntil(r.Start); err != nil {
+			return false, err
+		}
+		// add leaf hashes within the proof range
+		for i := r.Start; i < r.End; i++ {
+			leafHash, err := lh.NextLeafHash()
+			if err != nil {
+				return false, err
+			}
+			if err := tree.PushSubTree(0, leafHash); err != nil {
+				panic(err)
+			}
+		}
+		leafIndex += r.End - r.Start
+	}
+
+	// add remaining proof hashes after the last range ends
+	if err := consumeUntil(math.MaxUint64); err != nil {
+		return false, err
+	}
+
+	return bytes.Equal(tree.Root(), root), nil
+}
+
 // VerifyRangeProof verifies a proof produced by BuildRangeProof using leaf
 // hashes produced by lh, which must contain only the leaf hashes within the
 // proof range.
@@ -293,53 +381,7 @@ func VerifyRangeProof(lh LeafHasher, h hash.Hash, proofStart, proofEnd int, proo
 	if proofStart < 0 || proofStart > proofEnd || proofStart == proofEnd {
 		panic("VerifyRangeProof: illegal proof range")
 	}
-
-	// manually build a tree using the proof hashes
-	tree := New(h)
-
-	// add proof hashes up to proofStart
-	for i := 63; i >= 0 && len(proof) > 0; i-- {
-		subtreeSize := 1 << uint64(i)
-		if proofStart&subtreeSize != 0 {
-			if err := tree.PushSubTree(i, proof[0]); err != nil {
-				// PushSubTree only returns an error if i is greater than the
-				// current smallest subtree. Since the loop proceeds in
-				// descending order, this should never happen.
-				panic(err)
-			}
-			proof = proof[1:]
-		}
-	}
-
-	// add leaf hashes
-	for {
-		leafHash, err := lh.NextLeafHash()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return false, err
-		}
-		if err := tree.PushSubTree(0, leafHash); err != nil {
-			panic(err)
-		}
-	}
-
-	// add proof hashes after proofEnd
-	endMask := proofEnd - 1
-	for i := 0; i < 64 && len(proof) > 0; i++ {
-		subtreeSize := 1 << uint64(i)
-		if endMask&subtreeSize == 0 {
-			if err := tree.PushSubTree(i, proof[0]); err != nil {
-				// This *probably* should never happen, but just to guard
-				// against adversarial inputs, return an error instead of
-				// panicking.
-				return false, err
-			}
-			proof = proof[1:]
-		}
-	}
-
-	return bytes.Equal(tree.Root(), root), nil
+	return VerifyMultiRangeProof(lh, h, []LeafRange{{uint64(proofStart), uint64(proofEnd)}}, proof, root)
 }
 
 // proofMapping returns an index-to-index mapping that maps a hash's index in
