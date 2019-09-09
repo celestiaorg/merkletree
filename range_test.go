@@ -861,10 +861,13 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 	buildProof := func(ranges []LeafRange) [][]byte {
 		// flip a coin to decide whether to use leaf data or leaf hashes
 		var sh SubtreeHasher
-		if fastrand.Intn(2) == 0 {
+		choice := fastrand.Intn(3)
+		if choice == 0 {
 			sh = NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake)
-		} else {
+		} else if choice == 1 {
 			sh = NewCachedSubtreeHasher(leafHashes, blake)
+		} else if choice == 2 {
+			sh = NewMixedSubtreeHasher(nil, bytes.NewReader(leafData), 1, leafSize, blake)
 		}
 		proof, err := BuildDiffProof(ranges, sh, numLeaves)
 		if err != nil {
@@ -964,10 +967,13 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 	buildSmallProof := func(ranges []LeafRange, nLeaves int) [][]byte {
 		// flip a coin to decide whether to use leaf data or leaf hashes
 		var sh SubtreeHasher
-		if fastrand.Intn(2) == 0 {
+		choice := fastrand.Intn(3)
+		if choice == 0 {
 			sh = NewReaderSubtreeHasher(bytes.NewReader(leafData[:leafSize*nLeaves]), leafSize, blake)
-		} else {
+		} else if choice == 1 {
 			sh = NewCachedSubtreeHasher(leafHashes[:nLeaves], blake)
+		} else if choice == 2 {
+			sh = NewMixedSubtreeHasher(nil, bytes.NewReader(leafData[:leafSize*nLeaves]), 1, leafSize, blake)
 		}
 		proof, err := BuildDiffProof(ranges, sh, uint64(nLeaves))
 		if err != nil {
