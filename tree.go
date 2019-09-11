@@ -2,6 +2,7 @@ package merkletree
 
 import (
 	"errors"
+	"fmt"
 	"hash"
 )
 
@@ -230,7 +231,7 @@ func (t *Tree) PushSubTree(height int, sum []byte) error {
 	// We can only add the cached tree if its depth is <= the depth of the
 	// current subtree.
 	if t.head != nil && height > t.head.height {
-		return errors.New("can't add a subtree that is larger than the smallest subtree")
+		return fmt.Errorf("can't add a subtree that is larger than the smallest subtree %v > %v", height, t.head.height)
 	}
 
 	// Insert the cached tree as the new head.

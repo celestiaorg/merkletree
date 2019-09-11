@@ -49,7 +49,7 @@ func BuildDiffProof(ranges []LeafRange, h SubtreeHasher, numLeaves uint64) (proo
 // VerifyDiffProof verifies a proof produced by BuildDiffProof using leaf hashes
 // produced by lh, which must contain the concatenation of the leaf hashes
 // within the proof ranges.
-func VerifyDiffProof(lh LeafHasher, numLeaves uint64, h hash.Hash, ranges []LeafRange, proof [][]byte, root []byte) (bool, error) {
+func VerifyDiffProof(sh SubtreeHasher, numLeaves uint64, h hash.Hash, ranges []LeafRange, proof [][]byte, root []byte) (bool, error) {
 	// This code is a direct copy of the VerifyMultiRangeProof code, except that
 	// it ends by consuming until numLeaves instead of math.MaxUint64.
 	// Surprisingly, this change doesn't appear to be necessary; however, for
@@ -75,16 +75,18 @@ func VerifyDiffProof(lh LeafHasher, numLeaves uint64, h hash.Hash, ranges []Leaf
 		if err := consumeUntil(r.Start); err != nil {
 			return false, err
 		}
-		for i := r.Start; i < r.End; i++ {
-			leafHash, err := lh.NextLeafHash()
+		for leafIndex != r.End {
+			subtreeSize := nextSubtreeSize(leafIndex, r.End)
+			root, err := sh.NextSubtreeRoot(subtreeSize)
 			if err != nil {
 				return false, err
 			}
-			if err := tree.PushSubTree(0, leafHash); err != nil {
+			i := bits.TrailingZeros64(uint64(subtreeSize))
+			if err := tree.PushSubTree(i, root); err != nil {
 				panic(err)
 			}
+			leafIndex += uint64(subtreeSize)
 		}
-		leafIndex += r.End - r.Start
 	}
 	err := consumeUntil(numLeaves)
 	return bytes.Equal(tree.Root(), root), err
