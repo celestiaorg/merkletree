@@ -34,10 +34,13 @@ func BuildDiffProof(ranges []LeafRange, h SubtreeHasher, numLeaves uint64) (proo
 		if err := consumeUntil(r.Start); err != nil {
 			return nil, err
 		}
-		if err := h.Skip(int(r.End - r.Start)); err != nil {
-			return nil, err
+		for leafIndex != r.End {
+			subtreeSize := nextSubtreeSize(leafIndex, r.End)
+			if err := h.Skip(subtreeSize); err != nil {
+				return nil, err
+			}
+			leafIndex += uint64(subtreeSize)
 		}
-		leafIndex += r.End - r.Start
 	}
 	err = consumeUntil(numLeaves)
 	if err == io.EOF {
