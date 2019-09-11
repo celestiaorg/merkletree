@@ -151,6 +151,7 @@ type MixedSubtreeHasher struct {
 	csh           *CachedSubtreeHasher
 	rsh           *ReaderSubtreeHasher
 	leavesPerNode int
+	leafIndex     int
 }
 
 // NewMixedSubtreeHasher returns a new MixedSubtreeHasher that hashes nodeHashes
@@ -169,17 +170,28 @@ func NewMixedSubtreeHasher(nodeHashes [][]byte, leafReader io.Reader, leavesPerN
 
 // Skip implements SubtreeHasher.
 func (msh *MixedSubtreeHasher) Skip(n int) error {
-	if err := msh.csh.Skip(n / msh.leavesPerNode); err != nil {
+	// make sure we only skip cached hashes if we're on a proper boundary
+	if msh.leafIndex%msh.leavesPerNode == 0 && n >= msh.leavesPerNode {
+		if err := msh.csh.Skip(n / msh.leavesPerNode); err != nil {
+			return err
+		}
+		msh.leafIndex += n - (n % msh.leavesPerNode)
+		n %= msh.leavesPerNode
+	}
+	if err := msh.rsh.Skip(n); err != nil {
 		return err
 	}
-	return msh.rsh.Skip(n % msh.leavesPerNode)
+	msh.leafIndex += n
+	return nil
 }
 
 // NextSubtreeRoot implements SubtreeHasher.
 func (msh *MixedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
-	if subtreeSize >= msh.leavesPerNode {
+	if subtreeSize >= msh.leavesPerNode && msh.leafIndex%msh.leavesPerNode == 0 {
+		msh.leafIndex += subtreeSize
 		return msh.csh.NextSubtreeRoot(subtreeSize / msh.leavesPerNode)
 	}
+	msh.leafIndex += subtreeSize
 	return msh.rsh.NextSubtreeRoot(subtreeSize)
 }
 
