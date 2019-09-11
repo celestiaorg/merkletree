@@ -148,14 +148,9 @@ func NewCachedSubtreeHasher(leafHashes [][]byte, h hash.Hash) *CachedSubtreeHash
 // MixedSubtreeHasher implements SubtreeHasher by using cached subtree hashes
 // when possible and otherwise reading leaf hashes from the underlying stream.
 type MixedSubtreeHasher struct {
-	nodeHashes    [][]byte
+	csh           *CachedSubtreeHasher
+	rsh           *ReaderSubtreeHasher
 	leavesPerNode int
-	nodeHeight    int
-
-	leafReader io.Reader
-	leaf       []byte
-
-	h hash.Hash
 }
 
 // NewMixedSubtreeHasher returns a new MixedSubtreeHasher that hashes nodeHashes
@@ -164,69 +159,28 @@ type MixedSubtreeHasher struct {
 // greedy in regards to using the cached nodeHashes. A nodeHash will be consumed
 // as soon as NextSubtreeRoot or Skip are called with a size greater than or
 // equal to leavesPerNode.
-func NewMixedSubtreeHasher(nodeHashes [][]byte, leafReader io.Reader, leavesPerNode, leafSize int, h hash.Hash) *MixedSubtreeHasher {
-	msh := &MixedSubtreeHasher{
-		nodeHashes:    nodeHashes,
-		leafReader:    leafReader,
-		leaf:          make([]byte, leafSize),
+func NewMixedSubtreeHasher(nodeHashes [][]byte, leafReader io.Reader, leavesPerNode int, leafSize int, h hash.Hash) *MixedSubtreeHasher {
+	return &MixedSubtreeHasher{
+		csh:           NewCachedSubtreeHasher(nodeHashes, h),
+		rsh:           NewReaderSubtreeHasher(leafReader, leafSize, h),
 		leavesPerNode: leavesPerNode,
-		h:             h,
 	}
-	msh.nodeHeight = int(math.Log2(float64(msh.leavesPerNode)))
-	if msh.leavesPerNode%2 != 0 {
-		msh.nodeHeight++
-	}
-	return msh
 }
 
 // Skip implements SubtreeHasher.
-func (mh *MixedSubtreeHasher) Skip(n int) error {
-	for n >= mh.leavesPerNode && len(mh.nodeHashes) > 0 {
-		// Skipping a single node hash is equal to skipping leavesPerNode leaves.
-		mh.nodeHashes = mh.nodeHashes[1:]
-		n -= mh.leavesPerNode
+func (msh *MixedSubtreeHasher) Skip(n int) error {
+	if err := msh.csh.Skip(n / msh.leavesPerNode); err != nil {
+		return err
 	}
-	skipSize := int64(len(mh.leaf))
-	skipped, err := io.CopyN(ioutil.Discard, mh.leafReader, skipSize)
-	if err == io.EOF || err == io.ErrUnexpectedEOF {
-		if skipped == skipSize {
-			return nil
-		}
-		return io.ErrUnexpectedEOF
-	}
-	return err
+	return msh.rsh.Skip(n % msh.leavesPerNode)
 }
 
 // NextSubtreeRoot implements SubtreeHasher.
-func (mh *MixedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
-	tree := New(mh.h)
-	for subtreeSize >= mh.leavesPerNode && len(mh.nodeHashes) > 0 {
-		// Getting a subtree root of size 1 is equal to leavesPerNode leaves.
-		root := mh.nodeHashes[0]
-		mh.nodeHashes = mh.nodeHashes[1:]
-		subtreeSize -= mh.leavesPerNode
-		if err := tree.PushSubTree(mh.nodeHeight, root); err != nil {
-			return nil, err
-		}
+func (msh *MixedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	if subtreeSize >= msh.leavesPerNode {
+		return msh.csh.NextSubtreeRoot(subtreeSize / msh.leavesPerNode)
 	}
-	for i := 0; i < subtreeSize; i++ {
-		n, err := io.ReadFull(mh.leafReader, mh.leaf)
-		if n > 0 {
-			tree.Push(mh.leaf[:n])
-		}
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			break // reading a partial leaf is normal at the end of the stream
-		} else if err != nil {
-			return nil, err
-		}
-	}
-	root := tree.Root()
-	if root == nil {
-		// we didn't read anything; return EOF to signal that there are no
-		// more subtrees to hash.
-		return nil, io.EOF
-	}
-	return root, nil
+	return msh.rsh.NextSubtreeRoot(subtreeSize)
 }
 
 // BuildMultiRangeProof constructs a proof for the specified leaf ranges, using

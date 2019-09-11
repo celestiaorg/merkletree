@@ -737,7 +737,9 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	recalcProof, err := BuildRangeProof(numLeaves-1, numLeaves, NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake))
-	if !reflect.DeepEqual(proof, recalcProof) {
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(proof, recalcProof) {
 		t.Fatal("precalc failed")
 	}
 }
