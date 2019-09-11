@@ -172,7 +172,7 @@ func NewMixedSubtreeHasher(nodeHashes [][]byte, leafReader io.Reader, leavesPerN
 		leavesPerNode: leavesPerNode,
 		h:             h,
 	}
-	msh.nodeHeight = msh.leavesPerNode / 2
+	msh.nodeHeight = int(math.Log2(float64(msh.leavesPerNode)))
 	if msh.leavesPerNode%2 != 0 {
 		msh.nodeHeight++
 	}

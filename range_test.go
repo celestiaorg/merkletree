@@ -878,18 +878,25 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 	verifyProof := func(ranges []LeafRange, proof [][]byte) bool {
 		// flip a coin to decide whether to use leaf data or leaf hashes
 		var sth SubtreeHasher
+		choice := fastrand.Intn(3)
 		if fastrand.Intn(2) == 0 {
 			var rs []io.Reader
 			for _, r := range ranges {
 				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
 			}
 			sth = NewReaderSubtreeHasher(io.MultiReader(rs...), leafSize, blake)
-		} else {
+		} else if choice == 1 {
 			var hashes [][]byte
 			for _, r := range ranges {
 				hashes = append(hashes, leafHashes[r.Start:r.End]...)
 			}
 			sth = NewCachedSubtreeHasher(hashes, blake)
+		} else if choice == 2 {
+			var rs []io.Reader
+			for _, r := range ranges {
+				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
+			}
+			sth = NewMixedSubtreeHasher(nil, io.MultiReader(rs...), 1, leafSize, blake)
 		}
 		ok, err := VerifyDiffProof(sth, numLeaves, blake, ranges, proof, root)
 		if err != nil {
@@ -1337,124 +1344,102 @@ func BenchmarkVerifyRangeProof(b *testing.B) {
 	b.Run("full", benchRange(0, numLeaves-1))
 }
 
-//func TestBuildVerifyMixedDiffProof(t *testing.T) {
-//	// Prepare constants for test. We use 64 byte leaves which are summed up into 4
-//	// 4mib sector roots.
-//	const numSectors = 4
-//	const sectorSize = 1 << 22               // 4 mib
-//	const dataSize = numSectors * sectorSize // 16 mib
-//	const leafSize = 64
-//	const numLeaves = dataSize / leafSize
-//	const leavesPerSector = numLeaves / numSectors
-//	blake, _ := blake2b.New256(nil)
-//	leafData := make([]byte, dataSize)
-//	// Compute the root.
-//	root := bytesRoot(leafData, blake, leafSize)
-//	// Compute the root of each sector.
-//	sectorRoots := make([][]byte, 0, numSectors)
-//	for i := 0; i < numSectors; i++ {
-//		sr := bytesRoot(leafData[i*sectorSize:][:sectorSize], blake, leafSize)
-//		sectorRoots = append(sectorRoots, sr)
-//	}
-//	// Sanity check that sectorRoots sum up to root.
-//	nodeHash := func(left, right []byte) []byte {
-//		return nodeSum(blake, left, right)
-//	}
-//	root2 := nodeHash(nodeHash(sectorRoots[0], sectorRoots[1]), nodeHash(sectorRoots[2], sectorRoots[3]))
-//	if !bytes.Equal(root, root2) {
-//		t.Fatal("root and root2 should be equal")
-//	}
-//	// Split the leaves up into individual slices.
-//	leaves := make([][]byte, 0, numLeaves)
-//	buf := bytes.NewBuffer(leafData)
-//	for leaf := buf.Next(leafSize); len(leaf) != 0; leaf = buf.Next(leafSize) {
-//		leaves = append(leaves, leaf)
-//	}
-//	// Compute the leaves' hashes.
-//	leafHashes := make([][]byte, numLeaves)
-//	for i := range leafHashes {
-//		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
-//	}
-//	// Convenience function to build the proof of a sector. The modifiedOff and
-//	// modifiedLen define the offset and length within a 4mib sector which was
-//	// modified.
-//	buildSectorProof := func(sectorIndex uint64, modifiedOff, modifiedLen int) map[uint64]SubLeafProof {
-//		// [proofStart; proofEnd) defines the range of leaves which were modified
-//		// within the sector at sectorIndex and therefore need to be included in the
-//		// proof.
-//		proofStart := uint64(modifiedOff / leafSize)
-//		proofEnd := uint64((modifiedOff+modifiedLen)/leafSize) + 1
-//		proofRange := []LeafRange{{Start: proofStart, End: proofEnd}}
-//		// The subtree hasher is created from all the leaf hashes of the sector.
-//		sectorLeafHashes := leafHashes[sectorIndex*leavesPerSector:][:leavesPerSector]
-//		sth := NewMixedSubtreeHasher(sectorLeafHashes, blake)
-//		// Create the proof for the sector.
-//		slp, err := BuildDiffProof(proofRange, sth, uint64(len(sectorLeafHashes)))
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		// Verify that the proof is valid.
-//		lh := NewCachedLeafHasher(sectorLeafHashes)
-//		if ok, err := VerifyDiffProof(lh, uint64(len(sectorLeafHashes)), blake, proofRange, slp, sectorRoots[sectorIndex]); err != nil {
-//			t.Fatal(err)
-//		} else if !ok {
-//			t.Fatal("can't verify created subproof by itself")
-//		}
-//		// Append the sector root to the proof.
-//		slp = append(slp, sectorRoots[sectorIndex])
-//		// Add the proof to a map which maps the sector index to the proof.
-//		slps := make(map[uint64]SubLeafProof)
-//		slps[sectorIndex] = slp
-//		return slps
-//	}
-//	// Convenience function to build the full proof assuming that the sector at
-//	// index sectorIndex was changed and that slps contains a subproof for that
-//	// sector.
-//	buildFullProof := func(sectorIndex uint64, slps map[uint64]SubLeafProof) [][]byte {
-//		// [proofStart; proofEnd] defines the range of sectors that was modified. In
-//		// this case the sector at sectorIndex. Its hash is implicitly replaced by
-//		// slps.
-//		proofStart := uint64(sectorIndex)
-//		proofEnd := proofStart + 1
-//		proofRange := []LeafRange{{Start: proofStart, End: proofEnd}}
-//		// The subtree hasher is created from all the sector hashes.
-//		sh := NewCachedSubtreeHasher(sectorRoots, blake, slps)
-//		proof, err := BuildDiffProof(proofRange, sh, uint64(len(sectorRoots)))
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		return proof
-//	}
-//	// Convenience function to verify the full proof for a sector at sectorIndex
-//	// which has been modified with data of length modifiedLen at offset
-//	// modifiedOff.
-//	verifyProof := func(sectorIndex uint64, modifiedOff, modifiedLen int, proof [][]byte) bool {
-//		// [proofStart; proofEnd) defines the range of leaves that was modified.
-//		proofStart := sectorIndex*numLeaves + uint64(modifiedOff/leafSize)
-//		proofEnd := sectorIndex*numLeaves + uint64((modifiedOff+modifiedLen)/leafSize) + 1
-//		proofRange := []LeafRange{{Start: proofStart, End: proofEnd}}
-//		// The leaf hasher is created from all the leaves.
-//		lh := NewCachedLeafHasher(leafHashes)
-//		ok, err := VerifyDiffProof(lh, numLeaves, blake, proofRange, proof, root)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		return ok
-//	}
-//
-//	for i := 0; i < 100; i++ {
-//		// Build a proof for the modified sector at index 0.
-//		proofSectorIndex := uint64(fastrand.Intn(numSectors))
-//		proofModOff := fastrand.Intn(sectorSize - 1)
-//		proofModLen := fastrand.Intn(sectorSize-proofModOff) + 1
-//		subProof := buildSectorProof(proofSectorIndex, proofModOff, proofModLen)
-//		proof := buildFullProof(proofSectorIndex, subProof)
-//		// Try to verify the proof.
-//		verified := verifyProof(proofSectorIndex, proofModOff, proofModLen, proof)
-//		if !verified {
-//			t.Logf("subProof:\n%v\n", subProof)
-//			t.Logf("proof:\n%v\n", proof)
-//			t.Fatal("Failed to verify proof for modified sector", proofSectorIndex)
-//		}
-//	}
-//}
+func TestBuildVerifyMixedDiffProof(t *testing.T) {
+	// Prepare constants for test. We use 64 byte leaves which are summed up into 4
+	// 4mib sector roots.
+	const numSectors = 4
+	const sectorSize = 1 << 22               // 4 mib
+	const dataSize = numSectors * sectorSize // 16 mib
+	const leafSize = 64
+	const numLeaves = dataSize / leafSize
+	const leavesPerSector = numLeaves / numSectors
+	blake, _ := blake2b.New256(nil)
+	leafData := make([]byte, dataSize)
+	// Compute the root.
+	root := bytesRoot(leafData, blake, leafSize)
+	// Compute the root of each sector.
+	sectorRoots := make([][]byte, 0, numSectors)
+	for i := 0; i < numSectors; i++ {
+		sr := bytesRoot(leafData[i*sectorSize:][:sectorSize], blake, leafSize)
+		sectorRoots = append(sectorRoots, sr)
+	}
+	// Sanity check that sectorRoots sum up to root.
+	nodeHash := func(left, right []byte) []byte {
+		return nodeSum(blake, left, right)
+	}
+	root2 := nodeHash(nodeHash(sectorRoots[0], sectorRoots[1]), nodeHash(sectorRoots[2], sectorRoots[3]))
+	if !bytes.Equal(root, root2) {
+		t.Fatal("root and root2 should be equal")
+	}
+	// Split the leaves up into individual slices.
+	leaves := make([][]byte, 0, numLeaves)
+	buf := bytes.NewBuffer(leafData)
+	for leaf := buf.Next(leafSize); len(leaf) != 0; leaf = buf.Next(leafSize) {
+		leaves = append(leaves, leaf)
+	}
+	// Compute the leaves' hashes.
+	leafHashes := make([][]byte, numLeaves)
+	for i := range leafHashes {
+		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+	}
+	buildProof := func(ranges []LeafRange) [][]byte {
+		var nhs [][]byte
+		var rs []io.Reader
+		for _, r := range ranges {
+			if r.End-r.Start == leavesPerSector {
+				nhs = append(nhs, sectorRoots[r.Start/leavesPerSector])
+			} else if r.End-r.Start < leavesPerSector {
+				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
+			} else {
+				t.Fatal("range can't be bigger than leavesPerSector")
+			}
+		}
+		sh := NewMixedSubtreeHasher(nhs, io.MultiReader(rs...), leavesPerSector, leafSize, blake)
+		proof, err := BuildDiffProof(ranges, sh, numLeaves)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return proof
+	}
+	verifyProof := func(ranges []LeafRange, proof [][]byte) bool {
+		var nhs [][]byte
+		var rs []io.Reader
+		for _, r := range ranges {
+			if r.End-r.Start == leavesPerSector {
+				nhs = append(nhs, sectorRoots[r.Start/leavesPerSector])
+			} else if r.End-r.Start < leavesPerSector {
+				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
+			} else {
+				t.Fatal("range can't be bigger than leavesPerSector")
+			}
+		}
+		sth := NewMixedSubtreeHasher(nhs, io.MultiReader(rs...), leavesPerSector, leafSize, blake)
+		ok, err := VerifyDiffProof(sth, numLeaves, blake, ranges, proof, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+
+	// Build the expected proof using a simple ReaderSubtreeHasher.
+	ranges := []LeafRange{{0, 1}, {1, leavesPerSector}, {leavesPerSector, 2 * leavesPerSector}, {2 * leavesPerSector, 3 * leavesPerSector}}
+	sh := NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake)
+	expectedProof, err := BuildDiffProof(ranges, sh, numLeaves)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Verify the expected proof using the MixedSubtreeHasher.
+	expectedVerified := verifyProof(ranges, expectedProof)
+	if !expectedVerified {
+		t.Fatal("failed to verify expected proof using MixedSubtreeHasher")
+	}
+	// Build the proof using the MixedSubtreeHasher.
+	proof := buildProof(ranges)
+	// Try to verify the proof.
+	verified := verifyProof(ranges, proof)
+	if !verified {
+		t.Logf("proof:\n%v\n", proof)
+		t.Logf("expected proof:\n%v\n", expectedProof)
+		t.Fatal("Failed to verify proof for ranges", ranges)
+	}
+}
