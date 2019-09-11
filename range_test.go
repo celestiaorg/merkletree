@@ -1455,3 +1455,110 @@ func TestBuildVerifyMixedDiffProof(t *testing.T) {
 		t.Fatal("Failed to verify proof for ranges", ranges)
 	}
 }
+
+// TestBuildVerifyMixedDiffProofManual tests MixedSubtreeHasher against a manual
+// proof.
+func TestBuildVerifyMixedDiffProofManual(t *testing.T) {
+	// We want to build and verify this proof:
+	//
+	//               ┌───────────┴───────────┐
+	//         ┌─────┴─────┐           ┌─────┴─────*
+	//      ┌──┴──┐     ┌──┴──┐     ┌──┴──┐     ┌──┴──┐
+	//    ┌─┴─┐ ┌─┴─┐ ┌─┴─* ┌─┴─┐ ┌─┴─┐ *─┴─┐ ┌─┴─┐ ┌─┴─┐
+	//    0   1 2   3 4   5 6   7 8   9 10 11 12 13 14 15
+	//    ^^^^^^^^^^^^^     ^^^^^^^^^^^     ^
+	//
+	// Where the roots at height 2 (i.e. the roots of each group of 4 leaves)
+	// are cached, and we have a reader for leaves [4,12).
+	const numLeaves = 16
+	const leavesPerNode = 4
+	const leafSize = 64
+	const dataSize = numLeaves * leafSize
+	blake, _ := blake2b.New256(nil)
+	leafData := fastrand.Bytes(dataSize)
+	// Compute the root.
+	root := bytesRoot(leafData, blake, leafSize)
+	// Compute the cached roots.
+	nodeHashes := make([][]byte, numLeaves/leavesPerNode)
+	for i := range nodeHashes {
+		nodeHashes[i] = bytesRoot(leafData[i*leafSize*leavesPerNode:][:leafSize*leavesPerNode], blake, leafSize)
+	}
+	// Sanity check that nodeHashes sum up to root.
+	nodeHash := func(left, right []byte) []byte {
+		return nodeSum(blake, left, right)
+	}
+	root2 := nodeHash(nodeHash(nodeHashes[0], nodeHashes[1]), nodeHash(nodeHashes[2], nodeHashes[3]))
+	if !bytes.Equal(root, root2) {
+		t.Fatal("root and root2 should be equal")
+	}
+	// Split the leaf data up into individual leaves.
+	leaves := make([][]byte, 0, numLeaves)
+	buf := bytes.NewBuffer(leafData)
+	for buf.Len() > 0 {
+		leaves = append(leaves, buf.Next(leafSize))
+	}
+	// Compute the leaves' hashes.
+	leafHashes := make([][]byte, numLeaves)
+	for i := range leafHashes {
+		leafHashes[i] = leafSum(blake, leaves[i])
+	}
+
+	// Build the proof manually.
+	ranges := []LeafRange{
+		{0, 5},
+		{6, 10},
+		{11, 12},
+	}
+	manualProof := [][]byte{
+		leafHashes[5],  // [5,6)
+		leafHashes[10], // [10,11)
+		nodeHashes[3],  // [12,16)
+	}
+
+	// Verify the proof manually.
+	manualRoot := nodeHash(
+		nodeHash(
+			nodeHashes[0],
+			nodeHash(
+				nodeHash(leafHashes[4], manualProof[0]),
+				nodeHash(leafHashes[6], leafHashes[7]),
+			),
+		),
+		nodeHash(
+			nodeHash(
+				nodeHash(leafHashes[8], leafHashes[9]),
+				nodeHash(manualProof[1], leafHashes[11]),
+			),
+			manualProof[2],
+		),
+	)
+	if !bytes.Equal(manualRoot, root) {
+		t.Fatal("manual root is incorrect")
+	}
+
+	// Build the proof automatically.
+	proofData := io.MultiReader(bytes.NewReader(leafData[4*leafSize : 12*leafSize]))
+	proofNodes := [][]byte{nodeHashes[0], nodeHashes[3]}
+	msh := NewMixedSubtreeHasher(proofNodes, proofData, leavesPerNode, leafSize, blake)
+	proof, err := BuildDiffProof(ranges, msh, numLeaves)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(proof, manualProof) {
+		t.Fatal("proof does not match manual proof")
+	}
+
+	// Verify the proof automatically.
+	proofData = io.MultiReader(
+		bytes.NewReader(leafData[4*leafSize:5*leafSize]),
+		bytes.NewReader(leafData[6*leafSize:10*leafSize]),
+		bytes.NewReader(leafData[11*leafSize:12*leafSize]),
+	)
+	proofNodes = [][]byte{nodeHashes[0]}
+	msh = NewMixedSubtreeHasher(proofNodes, proofData, leavesPerNode, leafSize, blake)
+	ok, err := VerifyDiffProof(msh, numLeaves, blake, ranges, proof, root)
+	if err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("VerifyDiffProof rejected a valid proof")
+	}
+}
