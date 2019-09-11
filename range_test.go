@@ -869,7 +869,7 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 		} else if choice == 1 {
 			sh = NewCachedSubtreeHasher(leafHashes, blake)
 		} else if choice == 2 {
-			sh = NewMixedSubtreeHasher(nil, bytes.NewReader(leafData), 1, leafSize, blake)
+			sh = NewMixedSubtreeHasher(leafHashes, nil, 1, leafSize, blake)
 		}
 		proof, err := BuildDiffProof(ranges, sh, numLeaves)
 		if err != nil {
@@ -881,7 +881,7 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 		// flip a coin to decide whether to use leaf data or leaf hashes
 		var sth SubtreeHasher
 		choice := fastrand.Intn(3)
-		if fastrand.Intn(2) == 0 {
+		if choice == 0 {
 			var rs []io.Reader
 			for _, r := range ranges {
 				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
@@ -894,11 +894,11 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 			}
 			sth = NewCachedSubtreeHasher(hashes, blake)
 		} else if choice == 2 {
-			var rs []io.Reader
+			var hashes [][]byte
 			for _, r := range ranges {
-				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
+				hashes = append(hashes, leafHashes[r.Start:r.End]...)
 			}
-			sth = NewMixedSubtreeHasher(nil, io.MultiReader(rs...), 1, leafSize, blake)
+			sth = NewMixedSubtreeHasher(hashes, nil, 1, leafSize, blake)
 		}
 		ok, err := VerifyDiffProof(sth, numLeaves, blake, ranges, proof, root)
 		if err != nil {
@@ -977,12 +977,13 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 		// flip a coin to decide whether to use leaf data or leaf hashes
 		var sh SubtreeHasher
 		choice := fastrand.Intn(3)
+		choice = 0
 		if choice == 0 {
 			sh = NewReaderSubtreeHasher(bytes.NewReader(leafData[:leafSize*nLeaves]), leafSize, blake)
 		} else if choice == 1 {
 			sh = NewCachedSubtreeHasher(leafHashes[:nLeaves], blake)
 		} else if choice == 2 {
-			sh = NewMixedSubtreeHasher(nil, bytes.NewReader(leafData[:leafSize*nLeaves]), 1, leafSize, blake)
+			sh = NewMixedSubtreeHasher(leafHashes[:nLeaves], nil, 1, leafSize, blake)
 		}
 		proof, err := BuildDiffProof(ranges, sh, uint64(nLeaves))
 		if err != nil {
