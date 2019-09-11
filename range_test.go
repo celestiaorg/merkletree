@@ -1344,6 +1344,8 @@ func BenchmarkVerifyRangeProof(b *testing.B) {
 	b.Run("full", benchRange(0, numLeaves-1))
 }
 
+// TestBuildVerifyMixedDiffProof tests building and verifying proofs using the
+// MixedSubtreeHasher.
 func TestBuildVerifyMixedDiffProof(t *testing.T) {
 	// Prepare constants for test. We use 64 byte leaves which are summed up into 4
 	// 4mib sector roots.
@@ -1422,7 +1424,14 @@ func TestBuildVerifyMixedDiffProof(t *testing.T) {
 	}
 
 	// Build the expected proof using a simple ReaderSubtreeHasher.
-	ranges := []LeafRange{{0, 1}, {1, leavesPerSector}, {leavesPerSector, 2 * leavesPerSector}, {2 * leavesPerSector, 3 * leavesPerSector}}
+	ranges := []LeafRange{
+		{0, 1},
+		{1, leavesPerSector},
+		{leavesPerSector, 2 * leavesPerSector},
+		{2 * leavesPerSector, 2*leavesPerSector + 10},
+		{2*leavesPerSector + 10, 3 * leavesPerSector},
+		{3 * leavesPerSector, 4 * leavesPerSector},
+	}
 	sh := NewReaderSubtreeHasher(bytes.NewReader(leafData), leafSize, blake)
 	expectedProof, err := BuildDiffProof(ranges, sh, numLeaves)
 	if err != nil {
