@@ -1250,6 +1250,80 @@ func TestProofOfModificationTrim(t *testing.T) {
 	}
 }
 
+// TestProofOfModificationUpdate uses diff proofs to prove that a set of leaves
+// were updated.
+func TestProofOfModificationUpdate(t *testing.T) {
+	const leafSize = 64
+	const numLeaves = 16
+	const leavesPerNode = 4
+	const dataSize = leafSize * numLeaves
+	blake, _ := blake2b.New256(nil)
+	leafData := fastrand.Bytes(dataSize)
+	leafHashes := make([][]byte, numLeaves)
+	for i := range leafHashes {
+		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+	}
+	nodeHashes := make([][]byte, numLeaves/leavesPerNode)
+	for i := range nodeHashes {
+		nodeHashes[i] = bytesRoot(leafData[i*leafSize*leavesPerNode:][:leafSize*leavesPerNode], blake, leafSize)
+	}
+	root := bytesRoot(leafData, blake, leafSize)
+
+	// The modifications we want to make are:
+	//
+	// - Swap [4,8) [12,16)
+	// - Trim [12,16)
+	// - Update [2,4)
+	//
+	ranges := []LeafRange{{2, 4}, {4, 8}, {12, 16}}
+
+	// Generate new leaf data for the updated range
+	oldUpdateData := leafData[2*leafSize : 4*leafSize]
+	newUpdateData := fastrand.Bytes(len(oldUpdateData))
+
+	// We begin by constructing a diff proof for the old tree
+	msh := NewMixedSubtreeHasher(nodeHashes[1:], bytes.NewReader(leafData[:4*leafSize]), leavesPerNode, leafSize, blake)
+	proof, err := BuildDiffProof(ranges, msh, numLeaves)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expProof := [][]byte{bytesRoot(leafData[:2*leafSize], blake, leafSize), nodeHashes[2]}
+	if !reflect.DeepEqual(proof, expProof) {
+		t.Fatal("bad proof")
+	}
+
+	// The modified hashes are also sent along with the proof
+	rangeHashes := [][]byte{nodeHashes[1], nodeHashes[3]}
+
+	// Then we apply the modifications and construct the new root:
+	newLeafData := append([]byte(nil), leafData[:2*leafSize]...)
+	newLeafData = append(newLeafData, newUpdateData...)
+	newLeafData = append(newLeafData, leafData[12*leafSize:16*leafSize]...)
+	newLeafData = append(newLeafData, leafData[8*leafSize:12*leafSize]...)
+	newRoot := bytesRoot(newLeafData, blake, leafSize)
+
+	// The proof, modified hashes, and the new root are sent to the verifier.
+	msh = NewMixedSubtreeHasher(rangeHashes, bytes.NewReader(oldUpdateData), leavesPerNode, leafSize, blake)
+	ok, err := VerifyDiffProof(msh, numLeaves, blake, ranges, proof, root)
+	if err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("failed to verify old root")
+	}
+
+	// Next, we apply the modifications to our hashes and verify the new root:
+	rangeHashes[0], rangeHashes[1] = rangeHashes[1], rangeHashes[0]
+	rangeHashes = rangeHashes[:len(rangeHashes)-1]
+	ranges = ranges[:len(ranges)-1]
+	msh = NewMixedSubtreeHasher(rangeHashes, bytes.NewReader(newUpdateData), leavesPerNode, leafSize, blake)
+	ok, err = VerifyDiffProof(msh, numLeaves-4, blake, ranges, proof, newRoot)
+	if err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("failed to verify new root")
+	}
+}
+
 // BenchmarkBuildRangeProof benchmarks the performance of BuildRangeProof for
 // various proof ranges.
 func BenchmarkBuildRangeProof(b *testing.B) {
