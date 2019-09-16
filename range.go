@@ -178,9 +178,44 @@ func (msh *MixedSubtreeHasher) Skip(n int) error {
 // NextSubtreeRoot implements SubtreeHasher.
 func (msh *MixedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
 	if subtreeSize >= msh.leavesPerNode {
+		println("path 1")
 		return msh.csh.NextSubtreeRoot(subtreeSize / msh.leavesPerNode)
 	}
+	println("path 2", subtreeSize)
 	return msh.rsh.NextSubtreeRoot(subtreeSize)
+}
+
+// MixedSubtreeHasherVerifier implements SubtreeHasher by using cached subtree hashes
+// when possible and otherwise reading leaf hashes from the underlying stream.
+type MixedSubtreeHasherVerifier struct {
+	csh           *CachedSubtreeHasher
+	leavesPerNode int
+}
+
+// NewMixedSubtreeHasherVerifier returns a new MixedSubtreeHasherVerifier that hashes nodeHashes
+// which are already computed hashes of leavesPerNode leaves and also reads
+// individual leaves from leafReader. The behavior of this implementation is
+// greedy in regards to using the cached nodeHashes. A nodeHash will be consumed
+// as soon as NextSubtreeRoot or Skip are called with a size greater than or
+// equal to leavesPerNode.
+func NewMixedSubtreeHasherVerifier(nodeHashes [][]byte, leavesPerNode int, h hash.Hash) *MixedSubtreeHasherVerifier {
+	return &MixedSubtreeHasherVerifier{
+		csh:           NewCachedSubtreeHasher(nodeHashes, h),
+		leavesPerNode: leavesPerNode,
+	}
+}
+
+// Skip implements SubtreeHasher.
+func (msh *MixedSubtreeHasherVerifier) Skip(n int) error {
+	return msh.csh.Skip(n)
+}
+
+// NextSubtreeRoot implements SubtreeHasher.
+func (msh *MixedSubtreeHasherVerifier) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	if subtreeSize >= msh.leavesPerNode {
+		return msh.csh.NextSubtreeRoot(subtreeSize / msh.leavesPerNode)
+	}
+	return msh.csh.NextSubtreeRoot(subtreeSize)
 }
 
 // BuildMultiRangeProof constructs a proof for the specified leaf ranges, using
