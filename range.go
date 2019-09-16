@@ -178,10 +178,8 @@ func (msh *MixedSubtreeHasher) Skip(n int) error {
 // NextSubtreeRoot implements SubtreeHasher.
 func (msh *MixedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
 	if subtreeSize >= msh.leavesPerNode {
-		println("path 1")
 		return msh.csh.NextSubtreeRoot(subtreeSize / msh.leavesPerNode)
 	}
-	println("path 2", subtreeSize)
 	return msh.rsh.NextSubtreeRoot(subtreeSize)
 }
 
