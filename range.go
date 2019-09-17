@@ -190,9 +190,9 @@ type MixedSubtreeHasherVerifier struct {
 	leavesPerNode int
 }
 
-// NewMixedSubtreeHasherVerifier returns a new MixedSubtreeHasherVerifier that hashes nodeHashes
-// which are already computed hashes of leavesPerNode leaves and also reads
-// individual leaves from leafReader. The behavior of this implementation is
+// NewMixedSubtreeHasherVerifier returns a new MixedSubtreeHasherVerifier that
+// hashes nodeHashes which are already computed hashes of leavesPerNode leaves
+// and also individual leaf hashes. The behavior of this implementation is
 // greedy in regards to using the cached nodeHashes. A nodeHash will be consumed
 // as soon as NextSubtreeRoot or Skip are called with a size greater than or
 // equal to leavesPerNode.

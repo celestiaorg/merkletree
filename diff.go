@@ -84,8 +84,8 @@ func VerifyDiffProof(sh SubtreeHasher, numLeaves uint64, h hash.Hash, ranges []L
 			if err != nil {
 				return false, err
 			}
-			i := bits.TrailingZeros64(uint64(subtreeSize))
-			if err := tree.PushSubTree(i, root); err != nil {
+			height := bits.TrailingZeros64(uint64(subtreeSize))
+			if err := tree.PushSubTree(height, root); err != nil {
 				panic(err)
 			}
 			leafIndex += uint64(subtreeSize)
