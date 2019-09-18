@@ -49,9 +49,9 @@ func BuildDiffProof(ranges []LeafRange, h SubtreeHasher, numLeaves uint64) (proo
 	return proof, err
 }
 
-// VerifyDiffProof verifies a proof produced by BuildDiffProof using leaf hashes
-// produced by lh, which must contain the concatenation of the leaf hashes
-// within the proof ranges.
+// VerifyDiffProof verifies a proof produced by BuildDiffProof using subtree
+// hashes produced by sh, which must contain the concatenation of the subtree
+// hashes within the proof ranges.
 func VerifyDiffProof(sh SubtreeHasher, numLeaves uint64, h hash.Hash, ranges []LeafRange, proof [][]byte, root []byte) (bool, error) {
 	// This code is a direct copy of the VerifyMultiRangeProof code, except that
 	// it ends by consuming until numLeaves instead of math.MaxUint64.

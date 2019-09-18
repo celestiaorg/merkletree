@@ -177,6 +177,7 @@ func (msh *MixedSubtreeHasher) Skip(n int) error {
 
 // NextSubtreeRoot implements SubtreeHasher.
 func (msh *MixedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	// This will be hit if the current offset is aligned with the csh.
 	if subtreeSize >= msh.leavesPerNode {
 		return msh.csh.NextSubtreeRoot(subtreeSize / msh.leavesPerNode)
 	}

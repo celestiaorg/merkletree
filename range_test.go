@@ -981,7 +981,6 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 		// flip a coin to decide whether to use leaf data or leaf hashes
 		var sh SubtreeHasher
 		choice := fastrand.Intn(3)
-		choice = 0
 		if choice == 0 {
 			sh = NewReaderSubtreeHasher(bytes.NewReader(leafData[:leafSize*nLeaves]), leafSize, blake)
 		} else if choice == 1 {
