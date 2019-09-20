@@ -50,29 +50,15 @@ func BuildDiffProof(ranges []LeafRange, h SubtreeHasher, numLeaves uint64) (proo
 }
 
 // CompressLeafHashes takes the ranges of modified leaves as an input together
-// with a SubtreeHasher which can produce all leaf hashes to compress the leaf
-// hashes into subtrees where possible. These compressed leaf hashes can be used
-// as the 'rangeHashes' input to VerifyDiffProof.
+// with a SubtreeHasher which can produce all modified leaf hashes to compress
+// the leaf hashes into subtrees where possible. These compressed leaf hashes
+// can be used as the 'rangeHashes' input to VerifyDiffProof.
 func CompressLeafHashes(ranges []LeafRange, h SubtreeHasher) (compressed [][]byte, err error) {
 	if !validRangeSet(ranges) {
 		panic("BuildDiffProof: illegal set of proof ranges")
 	}
-	var leafIndex uint64
-	skipUntil := func(end uint64) error {
-		for leafIndex != end {
-			subtreeSize := nextSubtreeSize(leafIndex, end)
-			if err := h.Skip(subtreeSize); err != nil {
-				return err
-			}
-			leafIndex += uint64(subtreeSize)
-		}
-		return nil
-	}
 	for _, r := range ranges {
-		if err := skipUntil(r.Start); err != nil {
-			return nil, err
-		}
-		for leafIndex != r.End {
+		for leafIndex := r.Start; leafIndex != r.End; {
 			subtreeSize := nextSubtreeSize(leafIndex, r.End)
 			root, err := h.NextSubtreeRoot(subtreeSize)
 			if err != nil {

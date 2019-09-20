@@ -935,7 +935,11 @@ func TestCompressLeafHashes(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		sth := NewCachedSubtreeHasher(leafHashes, blake)
+		var hashes [][]byte
+		for _, r := range test.proofRanges {
+			hashes = append(hashes, leafHashes[r.Start:r.End]...)
+		}
+		sth := NewCachedSubtreeHasher(hashes, blake)
 		compressed, err := CompressLeafHashes(test.proofRanges, sth)
 		if err != nil {
 			t.Errorf("Test failed for range %v", test.proofRanges)
@@ -988,8 +992,8 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 		choice := fastrand.Intn(3)
 		if choice == 0 {
 			var rs []io.Reader
-			for _, r := range ranges {
-				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
+			for _, leafHash := range leafHashes {
+				rs = append(rs, bytes.NewReader(leafHash))
 			}
 			sth = NewReaderSubtreeHasher(io.MultiReader(rs...), leafSize, blake)
 		} else if choice == 1 {
@@ -997,7 +1001,7 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 			for _, r := range ranges {
 				hashes = append(hashes, leafHashes[r.Start:r.End]...)
 			}
-			sth = NewCachedSubtreeHasher(hashes, blake)
+			sth = NewCachedSubtreeHasher(leafHashes, blake)
 		} else if choice == 2 {
 			var hashes [][]byte
 			for _, r := range ranges {
