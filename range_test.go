@@ -845,6 +845,107 @@ func TestProofConversion(t *testing.T) {
 	}
 }
 
+// TestCompressLeafHashes tests CompressLeafHashes using a Merkle tree of size
+// 8.
+func TestCompressLeafHashes(t *testing.T) {
+	// Convenience method for hashing leaf hashes.
+	blake, _ := blake2b.New256(nil)
+	root := func(leafHashes [][]byte) []byte {
+		tree := New(blake)
+		for _, lh := range leafHashes {
+			if err := tree.PushSubTree(1, lh); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return tree.Root()
+	}
+
+	leafHashes := [][]byte{{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}}
+	tests := []struct {
+		proofRanges []LeafRange
+		compressed  [][]byte
+	}{
+		{
+			proofRanges: []LeafRange{
+				{Start: 0, End: 8},
+			},
+			compressed: [][]byte{
+				root(leafHashes),
+			},
+		},
+		{
+			proofRanges: []LeafRange{
+				{Start: 0, End: 4},
+				{Start: 4, End: 8},
+			},
+			compressed: [][]byte{
+				root(leafHashes[:4]),
+				root(leafHashes[4:]),
+			},
+		},
+		{
+			proofRanges: []LeafRange{
+				{Start: 0, End: 2},
+				{Start: 2, End: 4},
+				{Start: 4, End: 6},
+				{Start: 6, End: 8},
+			},
+			compressed: [][]byte{
+				root(leafHashes[:2]),
+				root(leafHashes[2:4]),
+				root(leafHashes[4:6]),
+				root(leafHashes[6:])},
+		},
+		{
+			proofRanges: []LeafRange{
+				{Start: 0, End: 1},
+				{Start: 1, End: 2},
+				{Start: 2, End: 3},
+				{Start: 3, End: 4},
+				{Start: 4, End: 5},
+				{Start: 5, End: 6},
+				{Start: 6, End: 7},
+				{Start: 7, End: 8},
+			},
+			compressed: leafHashes,
+		},
+		{
+			proofRanges: []LeafRange{
+				{Start: 1, End: 3},
+				{Start: 4, End: 8},
+			},
+			compressed: [][]byte{
+				leafHashes[1],
+				leafHashes[2],
+				root(leafHashes[4:]),
+			},
+		},
+		{
+			proofRanges: []LeafRange{
+				{Start: 0, End: 2},
+				{Start: 3, End: 4},
+				{Start: 4, End: 8},
+			},
+			compressed: [][]byte{
+				root(leafHashes[0:2]),
+				leafHashes[3],
+				root(leafHashes[4:]),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		sth := NewCachedSubtreeHasher(leafHashes, blake)
+		compressed, err := CompressLeafHashes(test.proofRanges, sth)
+		if err != nil {
+			t.Errorf("Test failed for range %v", test.proofRanges)
+		}
+		if !reflect.DeepEqual(test.compressed, compressed) {
+			t.Errorf("Test failed for range %v: expected %v but got %v", test.proofRanges, test.compressed, compressed)
+		}
+	}
+}
+
 // TestBuildVerifyDiffProof tests the BuildDiffProof and
 // VerifyDiffProof functions.
 func TestBuildVerifyDiffProof(t *testing.T) {
@@ -904,7 +1005,11 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 			}
 			sth = NewMixedSubtreeHasher(hashes, nil, 1, leafSize, blake)
 		}
-		ok, err := VerifyDiffProof(sth, numLeaves, blake, ranges, proof, root)
+		compressed, err := CompressLeafHashes(ranges, sth)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ok, err := VerifyDiffProof(compressed, numLeaves, blake, ranges, proof, root)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1011,7 +1116,11 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 			sth = NewCachedSubtreeHasher(hashes, blake)
 		}
 		smallRoot := bytesRoot(leafData[:leafSize*nLeaves], blake, leafSize)
-		ok, err := VerifyDiffProof(sth, uint64(nLeaves), blake, ranges, proof, smallRoot)
+		compressed, err := CompressLeafHashes(ranges, sth)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ok, err := VerifyDiffProof(compressed, uint64(nLeaves), blake, ranges, proof, smallRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1102,7 +1211,11 @@ func TestProofOfModification(t *testing.T) {
 		numRangeHashes += int(r.End - r.Start)
 	}
 	proofHashes, rangeHashes := proof[:len(proof)-numRangeHashes], proof[len(proof)-numRangeHashes:]
-	ok, err := VerifyDiffProof(NewCachedSubtreeHasher(rangeHashes, blake), numLeaves, blake, ranges, proofHashes, root)
+	compressed, err := CompressLeafHashes(ranges, NewCachedSubtreeHasher(rangeHashes, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := VerifyDiffProof(compressed, numLeaves, blake, ranges, proofHashes, root)
 	if err != nil {
 		t.Fatal(err)
 	} else if !ok {
@@ -1116,7 +1229,11 @@ func TestProofOfModification(t *testing.T) {
 	rangeHashes = append(rangeHashes, newLeafHash12)                // Append(12)
 	rangeHashes = append(rangeHashes, newLeafHash13)                // Append(13)
 	ranges = append(ranges, LeafRange{12, 13})                      // to include appended data
-	ok, err = VerifyDiffProof(NewCachedSubtreeHasher(rangeHashes, blake), numLeaves, blake, ranges, proofHashes, newRoot)
+	compressed, err = CompressLeafHashes(ranges, NewCachedSubtreeHasher(rangeHashes, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err = VerifyDiffProof(compressed, numLeaves, blake, ranges, proofHashes, newRoot)
 	if err != nil {
 		t.Fatal(err)
 	} else if !ok {
@@ -1169,7 +1286,11 @@ func TestProofOfModificationAppend(t *testing.T) {
 	// The proof and the new root are sent to the verifier. The verifier also
 	// knows newLeafHash15 and newLeafHash16.
 	proofHashes, rangeHashes := proof[:len(proof)-1], proof[len(proof)-1:]
-	ok, err := VerifyDiffProof(NewCachedSubtreeHasher(rangeHashes, blake), numLeaves, blake, ranges, proofHashes, root)
+	compressed, err := CompressLeafHashes(ranges, NewCachedSubtreeHasher(rangeHashes, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := VerifyDiffProof(compressed, numLeaves, blake, ranges, proofHashes, root)
 	if err != nil {
 		t.Fatal(err)
 	} else if !ok {
@@ -1182,7 +1303,11 @@ func TestProofOfModificationAppend(t *testing.T) {
 	rangeHashes[0], rangeHashes[1] = rangeHashes[1], rangeHashes[0]
 	rangeHashes = append(rangeHashes, newLeafHash16)
 	ranges = append(ranges, LeafRange{16, 17})
-	ok, err = VerifyDiffProof(NewCachedSubtreeHasher(rangeHashes, blake), numLeaves, blake, ranges, proofHashes, newRoot)
+	compressed, err = CompressLeafHashes(ranges, NewCachedSubtreeHasher(rangeHashes, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err = VerifyDiffProof(compressed, numLeaves, blake, ranges, proofHashes, newRoot)
 	if err != nil {
 		t.Fatal(err)
 	} else if !ok {
@@ -1230,7 +1355,11 @@ func TestProofOfModificationTrim(t *testing.T) {
 
 	// The proof and the new root are sent to the verifier.
 	proofHashes, rangeHashes := proof[:len(proof)-3], proof[len(proof)-3:]
-	ok, err := VerifyDiffProof(NewCachedSubtreeHasher(rangeHashes, blake), numLeaves, blake, ranges, proofHashes, root)
+	compressed, err := CompressLeafHashes(ranges, NewCachedSubtreeHasher(rangeHashes, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := VerifyDiffProof(compressed, numLeaves, blake, ranges, proofHashes, root)
 	if err != nil {
 		t.Fatal(err)
 	} else if !ok {
@@ -1241,7 +1370,11 @@ func TestProofOfModificationTrim(t *testing.T) {
 	rangeHashes[0], rangeHashes[2] = rangeHashes[2], rangeHashes[0]
 	rangeHashes = rangeHashes[:1]
 	ranges = []LeafRange{ranges[0]}
-	ok, err = VerifyDiffProof(NewCachedSubtreeHasher(rangeHashes, blake), numLeaves, blake, ranges, proofHashes, newRoot)
+	compressed, err = CompressLeafHashes(ranges, NewCachedSubtreeHasher(rangeHashes, blake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err = VerifyDiffProof(compressed, numLeaves, blake, ranges, proofHashes, newRoot)
 	if err != nil {
 		t.Fatal(err)
 	} else if !ok {
@@ -1303,7 +1436,11 @@ func TestProofOfModificationUpdate(t *testing.T) {
 
 	// The proof, modified hashes, and the new root are sent to the verifier.
 	msh = NewMixedSubtreeHasher(rangeHashes, bytes.NewReader(oldUpdateData), leavesPerNode, leafSize, blake)
-	ok, err := VerifyDiffProof(msh, numLeaves, blake, ranges, proof, root)
+	compressed, err := CompressLeafHashes(ranges, msh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := VerifyDiffProof(compressed, numLeaves, blake, ranges, proof, root)
 	if err != nil {
 		t.Fatal(err)
 	} else if !ok {
@@ -1315,7 +1452,11 @@ func TestProofOfModificationUpdate(t *testing.T) {
 	rangeHashes = rangeHashes[:len(rangeHashes)-1]
 	ranges = ranges[:len(ranges)-1]
 	msh = NewMixedSubtreeHasher(rangeHashes, bytes.NewReader(newUpdateData), leavesPerNode, leafSize, blake)
-	ok, err = VerifyDiffProof(msh, numLeaves-4, blake, ranges, proof, newRoot)
+	compressed, err = CompressLeafHashes(ranges, msh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err = VerifyDiffProof(compressed, numLeaves-4, blake, ranges, proof, newRoot)
 	if err != nil {
 		t.Fatal(err)
 	} else if !ok {
@@ -1496,7 +1637,11 @@ func TestBuildVerifyMixedDiffProof(t *testing.T) {
 			}
 		}
 		sth := NewMixedSubtreeHasher(nhs, io.MultiReader(rs...), leavesPerSector, leafSize, blake)
-		ok, err := VerifyDiffProof(sth, numLeaves, blake, ranges, proof, root)
+		compressed, err := CompressLeafHashes(ranges, sth)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ok, err := VerifyDiffProof(compressed, numLeaves, blake, ranges, proof, root)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1632,7 +1777,11 @@ func TestBuildVerifyMixedDiffProofManual(t *testing.T) {
 	)
 	proofNodes = [][]byte{nodeHashes[0]}
 	msh = NewMixedSubtreeHasher(proofNodes, proofData, leavesPerNode, leafSize, blake)
-	ok, err := VerifyDiffProof(msh, numLeaves, blake, ranges, proof, root)
+	compressed, err := CompressLeafHashes(ranges, msh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := VerifyDiffProof(compressed, numLeaves, blake, ranges, proof, root)
 	if err != nil {
 		t.Fatal(err)
 	} else if !ok {
