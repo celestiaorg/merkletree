@@ -992,8 +992,8 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 		choice := fastrand.Intn(3)
 		if choice == 0 {
 			var rs []io.Reader
-			for _, leafHash := range leafHashes {
-				rs = append(rs, bytes.NewReader(leafHash))
+			for _, r := range ranges {
+				rs = append(rs, bytes.NewReader(leafData[r.Start*leafSize:r.End*leafSize]))
 			}
 			sth = NewReaderSubtreeHasher(io.MultiReader(rs...), leafSize, blake)
 		} else if choice == 1 {
