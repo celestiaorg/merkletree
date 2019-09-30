@@ -932,6 +932,18 @@ func TestCompressLeafHashes(t *testing.T) {
 				root(leafHashes[4:]),
 			},
 		},
+		{
+			proofRanges: []LeafRange{
+				{Start: 0, End: 3},
+				{Start: 3, End: 8},
+			},
+			compressed: [][]byte{
+				root(leafHashes[0:2]),
+				leafHashes[2],
+				leafHashes[3],
+				root(leafHashes[4:]),
+			},
+		},
 	}
 
 	for _, test := range tests {
