@@ -145,6 +145,45 @@ func NewCachedSubtreeHasher(leafHashes [][]byte, h hash.Hash) *CachedSubtreeHash
 	}
 }
 
+// MixedSubtreeHasher implements SubtreeHasher by using cached subtree hashes
+// when possible and otherwise reading leaf hashes from the underlying stream.
+type MixedSubtreeHasher struct {
+	csh           *CachedSubtreeHasher
+	rsh           *ReaderSubtreeHasher
+	leavesPerNode int
+}
+
+// NewMixedSubtreeHasher returns a new MixedSubtreeHasher that hashes nodeHashes
+// which are already computed hashes of leavesPerNode leaves and also reads
+// individual leaves from leafReader. The behavior of this implementation is
+// greedy in regards to using the cached nodeHashes. A nodeHash will be consumed
+// as soon as NextSubtreeRoot or Skip are called with a size greater than or
+// equal to leavesPerNode.
+func NewMixedSubtreeHasher(nodeHashes [][]byte, leafReader io.Reader, leavesPerNode int, leafSize int, h hash.Hash) *MixedSubtreeHasher {
+	return &MixedSubtreeHasher{
+		csh:           NewCachedSubtreeHasher(nodeHashes, h),
+		rsh:           NewReaderSubtreeHasher(leafReader, leafSize, h),
+		leavesPerNode: leavesPerNode,
+	}
+}
+
+// Skip implements SubtreeHasher.
+func (msh *MixedSubtreeHasher) Skip(n int) error {
+	if n >= msh.leavesPerNode {
+		return msh.csh.Skip(n / msh.leavesPerNode)
+	}
+	return msh.rsh.Skip(n)
+}
+
+// NextSubtreeRoot implements SubtreeHasher.
+func (msh *MixedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([]byte, error) {
+	// This will be hit if the current offset is aligned with the csh.
+	if subtreeSize >= msh.leavesPerNode {
+		return msh.csh.NextSubtreeRoot(subtreeSize / msh.leavesPerNode)
+	}
+	return msh.rsh.NextSubtreeRoot(subtreeSize)
+}
+
 // BuildMultiRangeProof constructs a proof for the specified leaf ranges, using
 // the provided SubtreeHasher. The ranges must be sorted and non-overlapping.
 func BuildMultiRangeProof(ranges []LeafRange, h SubtreeHasher) (proof [][]byte, err error) {
@@ -235,11 +274,14 @@ func BuildMultiRangeProof(ranges []LeafRange, h SubtreeHasher) (proof [][]byte, 
 		if err := consumeUntil(r.Start); err != nil {
 			return nil, err
 		}
-		// skip leaves within proof range
-		if err := h.Skip(int(r.End - r.Start)); err != nil {
-			return nil, err
+		// skip leaves within proof range, one subtree at a time
+		for leafIndex != r.End {
+			subtreeSize := nextSubtreeSize(leafIndex, r.End)
+			if err := h.Skip(subtreeSize); err != nil {
+				return nil, err
+			}
+			leafIndex += uint64(subtreeSize)
 		}
-		leafIndex += r.End - r.Start
 	}
 
 	// keep adding proof hashes until we reach the end of the tree

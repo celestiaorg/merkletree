@@ -34,10 +34,13 @@ func BuildDiffProof(ranges []LeafRange, h SubtreeHasher, numLeaves uint64) (proo
 		if err := consumeUntil(r.Start); err != nil {
 			return nil, err
 		}
-		if err := h.Skip(int(r.End - r.Start)); err != nil {
-			return nil, err
+		for leafIndex != r.End {
+			subtreeSize := nextSubtreeSize(leafIndex, r.End)
+			if err := h.Skip(subtreeSize); err != nil {
+				return nil, err
+			}
+			leafIndex += uint64(subtreeSize)
 		}
-		leafIndex += r.End - r.Start
 	}
 	err = consumeUntil(numLeaves)
 	if err == io.EOF {
@@ -46,46 +49,57 @@ func BuildDiffProof(ranges []LeafRange, h SubtreeHasher, numLeaves uint64) (proo
 	return proof, err
 }
 
-// VerifyDiffProof verifies a proof produced by BuildDiffProof using leaf hashes
-// produced by lh, which must contain the concatenation of the leaf hashes
-// within the proof ranges.
-func VerifyDiffProof(lh LeafHasher, numLeaves uint64, h hash.Hash, ranges []LeafRange, proof [][]byte, root []byte) (bool, error) {
-	// This code is a direct copy of the VerifyMultiRangeProof code, except that
-	// it ends by consuming until numLeaves instead of math.MaxUint64.
-	// Surprisingly, this change doesn't appear to be necessary; however, for
-	// safety, it's best to be explicit.
+// CompressLeafHashes takes the ranges of modified leaves as an input together
+// with a SubtreeHasher which can produce all modified leaf hashes to compress
+// the leaf hashes into subtrees where possible. These compressed leaf hashes
+// can be used as the 'rangeHashes' input to VerifyDiffProof.
+func CompressLeafHashes(ranges []LeafRange, h SubtreeHasher) (compressed [][]byte, err error) {
+	if !validRangeSet(ranges) {
+		panic("BuildDiffProof: illegal set of proof ranges")
+	}
+	for _, r := range ranges {
+		for leafIndex := r.Start; leafIndex != r.End; {
+			subtreeSize := nextSubtreeSize(leafIndex, r.End)
+			root, err := h.NextSubtreeRoot(subtreeSize)
+			if err != nil {
+				return nil, err
+			}
+			compressed = append(compressed, root)
+			leafIndex += uint64(subtreeSize)
+		}
+	}
+	return
+}
+
+// VerifyDiffProof verifies a proof produced by BuildDiffProof using subtree
+// hashes produced by sh, which must contain the concatenation of the subtree
+// hashes within the proof ranges.
+func VerifyDiffProof(rangeHashes [][]byte, numLeaves uint64, h hash.Hash, ranges []LeafRange, proof [][]byte, root []byte) (bool, error) {
 	if !validRangeSet(ranges) {
 		panic("VerifyDiffProof: illegal set of proof ranges")
 	}
 	tree := New(h)
 	var leafIndex uint64
-	consumeUntil := func(end uint64) error {
-		for leafIndex != end && len(proof) > 0 {
+	consumeUntil := func(end uint64, hashes *[][]byte) error {
+		for leafIndex != end && len(*hashes) > 0 {
 			subtreeSize := nextSubtreeSize(leafIndex, end)
 			i := bits.TrailingZeros64(uint64(subtreeSize))
-			if err := tree.PushSubTree(i, proof[0]); err != nil {
+			if err := tree.PushSubTree(i, (*hashes)[0]); err != nil {
 				return err
 			}
-			proof = proof[1:]
+			*hashes = (*hashes)[1:]
 			leafIndex += uint64(subtreeSize)
 		}
 		return nil
 	}
 	for _, r := range ranges {
-		if err := consumeUntil(r.Start); err != nil {
+		if err := consumeUntil(r.Start, &proof); err != nil {
 			return false, err
 		}
-		for i := r.Start; i < r.End; i++ {
-			leafHash, err := lh.NextLeafHash()
-			if err != nil {
-				return false, err
-			}
-			if err := tree.PushSubTree(0, leafHash); err != nil {
-				panic(err)
-			}
+		if err := consumeUntil(r.End, &rangeHashes); err != nil {
+			return false, err
 		}
-		leafIndex += r.End - r.Start
 	}
-	err := consumeUntil(numLeaves)
+	err := consumeUntil(numLeaves, &proof)
 	return bytes.Equal(tree.Root(), root), err
 }
