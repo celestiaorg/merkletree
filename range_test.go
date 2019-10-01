@@ -1700,14 +1700,15 @@ func TestBuildVerifyMixedDiffProofManual(t *testing.T) {
 	// We want to build and verify this proof:
 	//
 	//               ┌───────────┴───────────┐
-	//         ┌─────┴─────┐           ┌─────┴─────*
-	//      ┌──┴──┐     ┌──┴──┐     ┌──┴──┐     ┌──┴──┐
+	//         ^─────┴─────┐           ┌─────┴─────*
+	//      ┌──┴──┐     ┌──┴──^     ^──┴──┐     ┌──┴──┐
 	//    ┌─┴─┐ ┌─┴─┐ ┌─┴─* ┌─┴─┐ ┌─┴─┐ *─┴─┐ ┌─┴─┐ ┌─┴─┐
 	//    0   1 2   3 4   5 6   7 8   9 10 11 12 13 14 15
 	//    ^^^^^^^^^^^^^     ^^^^^^^^^^^     ^
 	//
 	// Where the roots at height 2 (i.e. the roots of each group of 4 leaves)
-	// are cached, and we have a reader for leaves [4,12).
+	// are cached, and we have a reader for leaves [4,12). After compression the
+	// leafhashes will be compressed to the subtrees marked with '^'.
 	const numLeaves = 16
 	const leavesPerNode = 4
 	const leafSize = 64
