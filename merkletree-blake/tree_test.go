@@ -762,6 +762,7 @@ func TestPushSubTreeSimple(t *testing.T) {
 // BenchmarkTree64_4MB creates a Merkle tree out of 4MB using a segment size of
 // 64 bytes.
 func BenchmarkTree64_4MB(b *testing.B) {
+	b.ReportAllocs()
 	data := make([]byte, 4*1024*1024)
 	_, err := rand.Read(data)
 	if err != nil {
@@ -782,6 +783,7 @@ func BenchmarkTree64_4MB(b *testing.B) {
 // BenchmarkTree4k_4MB creates a Merkle tree out of 4MB using a segment size of
 // 4096 bytes.
 func BenchmarkTree4k_4MB(b *testing.B) {
+	b.ReportAllocs()
 	data := make([]byte, 4*1024*1024)
 	_, err := rand.Read(data)
 	if err != nil {

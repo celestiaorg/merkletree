@@ -58,7 +58,7 @@ func (ct *CachedTree) Prove(cachedProofSet [][32]byte) (merkleRoot [32]byte, pro
 // leaf, and not the index of the cached element containing the leaf. SetIndex
 // must be called on empty CachedTree.
 func (ct *CachedTree) SetIndex(i uint64) error {
-	if ct.head != nil {
+	if len(ct.stack) != 0 {
 		return errors.New("cannot call SetIndex on Tree if Tree has not been reset")
 	}
 	ct.trueProofIndex = i

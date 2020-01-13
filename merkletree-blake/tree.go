@@ -20,7 +20,7 @@ type Tree struct {
 	// tree. When a new leaf is inserted, it is inserted as a subtree of height
 	// 0. If there is another subtree of the same height, both can be removed,
 	// combined, and then inserted as a subtree of height n + 1.
-	head *subTree
+	stack []subTree
 
 	// Helper variables used to construct proofs that the data at 'proofIndex'
 	// is in the Merkle tree. The proofSet is constructed as elements are being
@@ -40,11 +40,9 @@ type Tree struct {
 }
 
 // A subTree contains the Merkle root of a complete (2^height leaves) subTree
-// of the Tree. 'sum' is the Merkle root of the subTree. If 'next' is not nil,
-// it will be a tree with a higher height.
+// of the Tree. 'sum' is the Merkle root of the subTree.
 type subTree struct {
-	next   *subTree
-	height int // Int is okay because a height over 300 is physically unachievable.
+	height int // a height over 300 is physically unachievable
 	sum    [32]byte
 }
 
@@ -70,18 +68,14 @@ func nodeSum(a, b [32]byte) [32]byte {
 }
 
 // joinSubTrees combines two equal sized subTrees into a larger subTree.
-func joinSubTrees(a, b *subTree) *subTree {
+func joinSubTrees(a, b subTree) subTree {
 	if DEBUG {
-		if b.next != a {
-			panic("invalid subtree join - 'a' is not paired with 'b'")
-		}
-		if a.height < b.height {
+		if a.height != b.height {
 			panic("invalid subtree presented - height mismatch")
 		}
 	}
 
-	return &subTree{
-		next:   a.next,
+	return subTree{
 		height: a.height + 1,
 		sum:    nodeSum(a.sum, b.sum),
 	}
@@ -90,7 +84,10 @@ func joinSubTrees(a, b *subTree) *subTree {
 // New creates a new Tree. BLAKE2b will be used for all hashing operations
 // within the Tree.
 func New() *Tree {
-	return &Tree{}
+	return &Tree{
+		// preallocate a stack large enough for most trees
+		stack: make([]subTree, 0, 32),
+	}
 }
 
 // Prove creates a proof that the leaf at the established index (established by
@@ -104,7 +101,7 @@ func (t *Tree) Prove() (merkleRoot [32]byte, proofSet [][32]byte, proofIndex uin
 
 	// Return nil if the Tree is empty, or if the proofIndex hasn't yet been
 	// reached.
-	if t.head == nil || len(t.proofSet) == 0 {
+	if len(t.stack) == 0 || len(t.proofSet) == 0 {
 		return t.Root(), nil, t.proofIndex, t.currentIndex
 	}
 	proofSet = t.proofSet
@@ -125,15 +122,16 @@ func (t *Tree) Prove() (merkleRoot [32]byte, proofSet [][32]byte, proofIndex uin
 	// can recognize the subtree containing the proof index because the height
 	// of that subtree will be one less than the current length of the proof
 	// set.
-	current := t.head
-	for current.next != nil && current.next.height < len(proofSet)-1 {
-		current = joinSubTrees(current.next, current)
+	i := len(t.stack) - 1
+	current := t.stack[i]
+	for i--; i >= 0 && t.stack[i].height < len(proofSet)-1; i-- {
+		current = joinSubTrees(t.stack[i], current)
 	}
 
 	// Sanity check - check that either 'current' or 'current.next' is the
 	// subtree containing the proof index.
 	if DEBUG {
-		if current.height != len(t.proofSet)-1 && (current.next != nil && current.next.height != len(t.proofSet)-1) {
+		if current.height != len(t.proofSet)-1 && (i >= 0 && t.stack[i].height != len(t.proofSet)-1) {
 			panic("could not find the subtree containing the proof index")
 		}
 	}
@@ -142,21 +140,21 @@ func (t *Tree) Prove() (merkleRoot [32]byte, proofSet [][32]byte, proofIndex uin
 	// then it must be an aggregate subtree that is to the right of the subtree
 	// containing the proof index, and the next subtree is the subtree
 	// containing the proof index.
-	if current.next != nil && current.next.height == len(proofSet)-1 {
+	if i >= 0 && t.stack[i].height == len(proofSet)-1 {
 		proofSet = append(proofSet, current.sum)
-		current = current.next
+		current = t.stack[i]
+		i--
 	}
 
 	// The current subtree must be the subtree containing the proof index. This
 	// subtree does not need an entry, as the entry was created during the
 	// construction of the Tree. Instead, skip to the next subtree.
-	current = current.next
-
+	//
 	// All remaining subtrees will be added to the proof set as a left sibling,
 	// completing the proof set.
-	for current != nil {
+	for ; i >= 0; i-- {
+		current = t.stack[i]
 		proofSet = append(proofSet, current.sum)
-		current = current.next
 	}
 	return t.Root(), proofSet, t.proofIndex, t.currentIndex
 }
@@ -180,31 +178,16 @@ func (t *Tree) Push(data []byte) {
 	// is going to be the data for cached trees, and is going to be the result
 	// of calling leafSum() on the data for standard trees. Doing a check here
 	// prevents needing to duplicate the entire 'Push' function for the trees.
-	t.head = &subTree{
-		next:   t.head,
+	t.stack = append(t.stack, subTree{
 		height: 0,
 		sum:    leafSum(data),
-	}
+	})
 
 	// Join subTrees if possible.
 	t.joinAllSubTrees()
 
 	// Update the index.
 	t.currentIndex++
-
-	// Sanity check - From head to tail of the stack, the height should be
-	// strictly increasing.
-	if DEBUG {
-		current := t.head
-		height := current.height
-		for current.next != nil {
-			current = current.next
-			if current.height <= height {
-				panic("subtrees are out of order")
-			}
-			height = current.height
-		}
-	}
 }
 
 // PushSubTree pushes a cached subtree into the merkle tree. The subtree has to
@@ -229,16 +212,15 @@ func (t *Tree) PushSubTree(height int, sum [32]byte) error {
 
 	// We can only add the cached tree if its depth is <= the depth of the
 	// current subtree.
-	if t.head != nil && height > t.head.height {
-		return fmt.Errorf("can't add a subtree that is larger than the smallest subtree %v > %v", height, t.head.height)
+	if len(t.stack) != 0 && height > t.stack[len(t.stack)-1].height {
+		return fmt.Errorf("can't add a subtree that is larger than the smallest subtree %v > %v", height, t.stack[len(t.stack)-1].height)
 	}
 
 	// Insert the cached tree as the new head.
-	t.head = &subTree{
+	t.stack = append(t.stack, subTree{
 		height: height,
-		next:   t.head,
 		sum:    sum,
-	}
+	})
 
 	// Join subTrees if possible.
 	t.joinAllSubTrees()
@@ -246,44 +228,30 @@ func (t *Tree) PushSubTree(height int, sum [32]byte) error {
 	// Update the index.
 	t.currentIndex = newIndex
 
-	// Sanity check - From head to tail of the stack, the height should be
-	// strictly increasing.
-	if DEBUG {
-		current := t.head
-		height := current.height
-		for current.next != nil {
-			current = current.next
-			if current.height <= height {
-				panic("subtrees are out of order")
-			}
-			height = current.height
-		}
-	}
 	return nil
 }
 
 // Root returns the Merkle root of the data that has been pushed.
 func (t *Tree) Root() [32]byte {
 	// If the Tree is empty, return nil.
-	if t.head == nil {
+	if len(t.stack) == 0 {
 		return [32]byte{}
 	}
 
 	// The root is formed by hashing together subTrees in order from least in
 	// height to greatest in height. The taller subtree is the first subtree in
 	// the join.
-	current := t.head
-	for current.next != nil {
-		current = joinSubTrees(current.next, current)
+	current := t.stack[len(t.stack)-1]
+	for i := len(t.stack) - 2; i >= 0; i-- {
+		current = joinSubTrees(t.stack[i], current)
 	}
-	// Return a copy to prevent leaking a pointer to internal data.
 	return current.sum
 }
 
 // SetIndex will tell the Tree to create a storage proof for the leaf at the
 // input index. SetIndex must be called on an empty tree.
 func (t *Tree) SetIndex(i uint64) error {
-	if t.head != nil {
+	if len(t.stack) != 0 {
 		return errors.New("cannot call SetIndex on Tree if Tree has not been reset")
 	}
 	t.proofTree = true
@@ -295,25 +263,28 @@ func (t *Tree) SetIndex(i uint64) error {
 // height of the next subTree is the same as the height of the current subTree,
 // the two will be combined into a single subTree of height n+1.
 func (t *Tree) joinAllSubTrees() {
-	for t.head.next != nil && t.head.height == t.head.next.height {
+	for len(t.stack) > 1 && t.stack[len(t.stack)-1].height == t.stack[len(t.stack)-2].height {
+		i := len(t.stack) - 1
+		j := len(t.stack) - 2
+
 		// Before combining subtrees, check whether one of the subtree hashes
 		// needs to be added to the proof set. This is going to be true IFF the
 		// subtrees being combined are one height higher than the previous
 		// subtree added to the proof set. The height of the previous subtree
 		// added to the proof set is equal to len(t.proofSet) - 1.
-		if t.head.height == len(t.proofSet)-1 {
+		if t.stack[i].height == len(t.proofSet)-1 {
 			// One of the subtrees needs to be added to the proof set. The
 			// subtree that needs to be added is the subtree that does not
 			// contain the proofIndex. Because the subtrees being compared are
 			// the smallest and rightmost trees in the Tree, this can be
 			// determined by rounding the currentIndex down to the number of
 			// nodes in the subtree and comparing that index to the proofIndex.
-			leaves := uint64(1 << uint(t.head.height))
+			leaves := uint64(1 << t.stack[i].height)
 			mid := (t.currentIndex / leaves) * leaves
 			if t.proofIndex < mid {
-				t.proofSet = append(t.proofSet, t.head.sum)
+				t.proofSet = append(t.proofSet, t.stack[i].sum)
 			} else {
-				t.proofSet = append(t.proofSet, t.head.next.sum)
+				t.proofSet = append(t.proofSet, t.stack[j].sum)
 			}
 
 			// Sanity check - the proofIndex should never be less than the
@@ -325,8 +296,17 @@ func (t *Tree) joinAllSubTrees() {
 			}
 		}
 
-		// Join the two subTrees into one subTree with a greater height. Then
-		// compare the new subTree to the next subTree.
-		t.head = joinSubTrees(t.head.next, t.head)
+		// Join the two subTrees into one subTree with a greater height.
+		t.stack = append(t.stack[:j], joinSubTrees(t.stack[j], t.stack[i]))
+	}
+
+	// Sanity check - From head to tail of the stack, the height should be
+	// strictly increasing.
+	if DEBUG {
+		for i := range t.stack[1:] {
+			if t.stack[i].height >= t.stack[i+1].height {
+				panic("subtrees are out of order")
+			}
+		}
 	}
 }
