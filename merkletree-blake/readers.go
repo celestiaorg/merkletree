@@ -60,7 +60,7 @@ func BuildReaderProof(r io.Reader, segmentSize int, index uint64) (root [32]byte
 	if err != nil {
 		return
 	}
-	root, proofSet, _, numLeaves = tree.Prove()
+	root, _, proofSet, _, numLeaves = tree.Prove()
 	if len(proofSet) == 0 {
 		err = errors.New("index was not reached while creating proof")
 		return

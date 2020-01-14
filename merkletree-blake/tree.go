@@ -29,6 +29,7 @@ type Tree struct {
 	// if the tree will be used to create a merkle proof.
 	currentIndex uint64
 	proofIndex   uint64
+	proofBase    []byte
 	proofSet     [][32]byte
 	proofTree    bool
 
@@ -70,7 +71,7 @@ func nodeSum(a, b [32]byte) [32]byte {
 // joinSubTrees combines two equal sized subTrees into a larger subTree.
 func joinSubTrees(a, b subTree) subTree {
 	if DEBUG {
-		if a.height != b.height {
+		if a.height < b.height {
 			panic("invalid subtree presented - height mismatch")
 		}
 	}
@@ -94,7 +95,7 @@ func New() *Tree {
 // SetIndex) is an element of the Merkle tree. Prove will return a nil proof
 // set if used incorrectly. Prove does not modify the Tree. Prove can only be
 // called if SetIndex has been called previously.
-func (t *Tree) Prove() (merkleRoot [32]byte, proofSet [][32]byte, proofIndex uint64, numLeaves uint64) {
+func (t *Tree) Prove() (merkleRoot [32]byte, base []byte, proofSet [][32]byte, proofIndex uint64, numLeaves uint64) {
 	if !t.proofTree {
 		panic("wrong usage: can't call prove on a tree if SetIndex wasn't called")
 	}
@@ -102,7 +103,7 @@ func (t *Tree) Prove() (merkleRoot [32]byte, proofSet [][32]byte, proofIndex uin
 	// Return nil if the Tree is empty, or if the proofIndex hasn't yet been
 	// reached.
 	if len(t.stack) == 0 || len(t.proofSet) == 0 {
-		return t.Root(), nil, t.proofIndex, t.currentIndex
+		return t.Root(), nil, nil, t.proofIndex, t.currentIndex
 	}
 	proofSet = t.proofSet
 
@@ -156,7 +157,7 @@ func (t *Tree) Prove() (merkleRoot [32]byte, proofSet [][32]byte, proofIndex uin
 		current = t.stack[i]
 		proofSet = append(proofSet, current.sum)
 	}
-	return t.Root(), proofSet, t.proofIndex, t.currentIndex
+	return t.Root(), t.proofBase, proofSet, t.proofIndex, t.currentIndex
 }
 
 // Push will add data to the set, building out the Merkle tree and Root. The
@@ -171,6 +172,7 @@ func (t *Tree) Push(data []byte) {
 	// The first element of a proof is the data at the proof index. If this
 	// data is being inserted at the proof index, it is added to the proof set.
 	if t.currentIndex == t.proofIndex {
+		t.proofBase = data
 		t.proofSet = append(t.proofSet, leafSum(data))
 	}
 
@@ -301,10 +303,10 @@ func (t *Tree) joinAllSubTrees() {
 	}
 
 	// Sanity check - From head to tail of the stack, the height should be
-	// strictly increasing.
+	// strictly decreasing.
 	if DEBUG {
 		for i := range t.stack[1:] {
-			if t.stack[i].height >= t.stack[i+1].height {
+			if t.stack[i].height <= t.stack[i+1].height {
 				panic("subtrees are out of order")
 			}
 		}

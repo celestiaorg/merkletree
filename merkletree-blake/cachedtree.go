@@ -37,7 +37,7 @@ func (ct *CachedTree) Prove(cachedProofSet [][32]byte) (merkleRoot [32]byte, pro
 
 	// Get the proof set tail, which is generated based entirely on cached
 	// nodes.
-	merkleRoot, proofSetTail, _, _ := ct.Tree.Prove()
+	merkleRoot, _, proofSetTail, _, _ := ct.Tree.Prove()
 	if len(proofSetTail) < 1 {
 		// The proof was invalid, return 'nil' for the proof set but accurate
 		// values for everything else.
