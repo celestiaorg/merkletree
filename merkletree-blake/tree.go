@@ -279,7 +279,7 @@ func (t *Tree) joinAllSubTrees() {
 			// the smallest and rightmost trees in the Tree, this can be
 			// determined by rounding the currentIndex down to the number of
 			// nodes in the subtree and comparing that index to the proofIndex.
-			leaves := uint64(1 << t.stack[i].height)
+			leaves := uint64(1 << uint(t.stack[i].height))
 			mid := (t.currentIndex / leaves) * leaves
 			if t.proofIndex < mid {
 				t.proofSet = append(t.proofSet, t.stack[i].sum)
