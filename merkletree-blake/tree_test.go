@@ -276,7 +276,7 @@ func TestBuildAndVerifyProof(t *testing.T) {
 			}
 
 			// Get the proof and check all values.
-			merkleRoot, proofSet, proofIndex, numSegments := tree.Prove()
+			merkleRoot, _, proofSet, proofIndex, numSegments := tree.Prove()
 			if merkleRoot != mt.roots[i] {
 				t.Error("incorrect Merkle root returned by Tree for indices", i, j)
 			}
@@ -312,7 +312,7 @@ func TestBuildAndVerifyProof(t *testing.T) {
 
 			// Check that calling Prove a second time results in the same
 			// values.
-			merkleRoot2, proofSet2, proofIndex2, numSegments2 := tree.Prove()
+			merkleRoot2, _, proofSet2, proofIndex2, numSegments2 := tree.Prove()
 			if merkleRoot != merkleRoot2 {
 				t.Error("tree returned different merkle roots after calling Prove twice for indices", i, j)
 			}
@@ -346,7 +346,7 @@ func TestBadInputs(t *testing.T) {
 	if root != ([32]byte{}) {
 		t.Error("root of empty tree should be nil")
 	}
-	_, proof, _, _ := tree.Prove()
+	_, _, proof, _, _ := tree.Prove()
 	if proof != nil {
 		t.Error("proof of empty tree should be nil")
 	}
@@ -357,7 +357,7 @@ func TestBadInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	tree.Push([]byte{1})
-	_, proof, _, _ = tree.Prove()
+	_, _, proof, _, _ = tree.Prove()
 	if proof != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestCompatibility(t *testing.T) {
 			}
 
 			// Build the proof for the tree and run it through verify.
-			merkleRoot, proofSet, proofIndex, numLeaves := tree.Prove()
+			merkleRoot, _, proofSet, proofIndex, numLeaves := tree.Prove()
 			if !VerifyProof(merkleRoot, proofSet, proofIndex, numLeaves) {
 				t.Error("proof didn't verify for indices", i, j)
 			}
@@ -458,7 +458,7 @@ func TestCompatibility(t *testing.T) {
 		}
 
 		// Get the proof for the tree and run it through verify.
-		merkleRoot, proofSet, proofIndex, numLeaves := tree.Prove()
+		merkleRoot, _, proofSet, proofIndex, numLeaves := tree.Prove()
 		if !VerifyProof(merkleRoot, proofSet, proofIndex, numLeaves) {
 			t.Error("proof didn't verify in long test", size, proofIndex)
 		}
@@ -473,7 +473,7 @@ func TestLeafCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, leaves := tree.Prove()
+	_, _, _, _, leaves := tree.Prove()
 	if leaves != 0 {
 		t.Error("bad reporting of leaf count")
 	}
@@ -484,7 +484,7 @@ func TestLeafCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	tree.Push([]byte{})
-	_, _, _, leaves = tree.Prove()
+	_, _, _, _, leaves = tree.Prove()
 	if leaves != 1 {
 		t.Error("bad reporting on leaf count")
 	}
@@ -658,15 +658,15 @@ func TestPushSubTreeCorrectRootWithProof(t *testing.T) {
 	}
 
 	// Test the proofs for all the trees.
-	merkleRoot, proofSet, index, numLeaves := tree.Prove()
+	merkleRoot, _, proofSet, index, numLeaves := tree.Prove()
 	if !VerifyProof(merkleRoot, proofSet, index, numLeaves) {
 		t.Fatal("failed to verify proof for tree")
 	}
-	merkleRoot, proofSet, index, numLeaves = tree2.Prove()
+	merkleRoot, _, proofSet, index, numLeaves = tree2.Prove()
 	if !VerifyProof(merkleRoot, proofSet, index, numLeaves) {
 		t.Fatal("failed to verify proof for tree2")
 	}
-	merkleRoot, proofSet, index, numLeaves = tree3.Prove()
+	merkleRoot, _, proofSet, index, numLeaves = tree3.Prove()
 	if !VerifyProof(merkleRoot, proofSet, index, numLeaves) {
 		t.Fatal("failed to verify proof for tree3")
 	}

@@ -205,7 +205,7 @@ func TestCachedTreeConstruction(t *testing.T) {
 	tree.Push(arbData[3])
 	root := tree.Root()
 	// Construct the proofs.
-	_, subTreeProofSet, _, _ := subTree1.Prove()
+	_, _, subTreeProofSet, _, _ := subTree1.Prove()
 	_, proofSet, proofIndex, numLeaves := cachedTree.Prove(subTreeProofSet)
 	if !VerifyProof(root, proofSet, proofIndex, numLeaves) {
 		t.Error("proof was unsuccessful")
@@ -240,7 +240,7 @@ func TestCachedTreeConstruction(t *testing.T) {
 	tree.Push(arbData[2])
 	root = tree.Root()
 	// Construct the proofs.
-	_, subTreeProofSet, _, _ = subTree3.Prove()
+	_, _, subTreeProofSet, _, _ = subTree3.Prove()
 	_, proofSet, proofIndex, numLeaves = cachedTree.Prove(subTreeProofSet)
 	if !VerifyProof(root, proofSet, proofIndex, numLeaves) {
 		t.Error("proof was unsuccessful")
@@ -293,7 +293,7 @@ func TestCachedTreeConstruction(t *testing.T) {
 	tree.Push(arbData[7])
 	root = tree.Root()
 	// Construct the proofs.
-	_, subTreeProofSet, _, _ = subTree2.Prove()
+	_, _, subTreeProofSet, _, _ = subTree2.Prove()
 	_, proofSet, proofIndex, numLeaves = cachedTree.Prove(subTreeProofSet)
 	if !VerifyProof(root, proofSet, proofIndex, numLeaves) {
 		t.Error("proof was unsuccessful")
@@ -337,12 +337,12 @@ func TestCachedTreeConstructionAuto(t *testing.T) {
 
 					// Get the proof of the subtree
 					if k == j/n {
-						_, subProof, _, _ = subtree.Prove()
+						_, _, subProof, _, _ = subtree.Prove()
 					}
 				}
 
 				// Verify that the tree was built correctly.
-				treeRoot, treeProof, treeProofIndex, treeLeaves := tree.Prove()
+				treeRoot, _, treeProof, treeProofIndex, treeLeaves := tree.Prove()
 				if !VerifyProof(treeRoot, treeProof, treeProofIndex, treeLeaves) {
 					t.Error("tree problems", i, j)
 				}

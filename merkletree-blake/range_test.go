@@ -789,7 +789,7 @@ func TestProofConversion(t *testing.T) {
 			for buf.Len() > 0 {
 				t.Push(buf.Next(test.leafSize))
 			}
-			_, proof, _, _ := t.Prove()
+			_, _, proof, _, _ := t.Prove()
 			return proof[1:]
 		}
 
