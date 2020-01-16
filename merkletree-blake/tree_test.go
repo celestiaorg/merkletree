@@ -116,29 +116,29 @@ func CreateMerkleTester(t *testing.T) (mt *MerkleTester) {
 	// Tree creates for the same values.
 	mt.proofSets[1] = make(map[int][][32]byte)
 	mt.proofSets[1][0] = [][32]byte{
-		leafSum(mt.data[0]),
+		LeafSum(mt.data[0]),
 	}
 
 	mt.proofSets[2] = make(map[int][][32]byte)
 	mt.proofSets[2][0] = [][32]byte{
-		leafSum(mt.data[0]),
+		LeafSum(mt.data[0]),
 		mt.leaves[1],
 	}
 
 	mt.proofSets[2][1] = [][32]byte{
-		leafSum(mt.data[1]),
+		LeafSum(mt.data[1]),
 		mt.leaves[0],
 	}
 
 	mt.proofSets[5] = make(map[int][][32]byte)
 	mt.proofSets[5][4] = [][32]byte{
-		leafSum(mt.data[4]),
+		LeafSum(mt.data[4]),
 		mt.roots[4],
 	}
 
 	mt.proofSets[6] = make(map[int][][32]byte)
 	mt.proofSets[6][0] = [][32]byte{
-		leafSum(mt.data[0]),
+		LeafSum(mt.data[0]),
 		mt.leaves[1],
 		mt.join(
 			mt.leaves[2],
@@ -151,7 +151,7 @@ func CreateMerkleTester(t *testing.T) (mt *MerkleTester) {
 	}
 
 	mt.proofSets[6][2] = [][32]byte{
-		leafSum(mt.data[2]),
+		LeafSum(mt.data[2]),
 		mt.leaves[3],
 		mt.roots[2],
 		mt.join(
@@ -161,20 +161,20 @@ func CreateMerkleTester(t *testing.T) (mt *MerkleTester) {
 	}
 
 	mt.proofSets[6][4] = [][32]byte{
-		leafSum(mt.data[4]),
+		LeafSum(mt.data[4]),
 		mt.leaves[5],
 		mt.roots[4],
 	}
 
 	mt.proofSets[6][5] = [][32]byte{
-		leafSum(mt.data[5]),
+		LeafSum(mt.data[5]),
 		mt.leaves[4],
 		mt.roots[4],
 	}
 
 	mt.proofSets[7] = make(map[int][][32]byte)
 	mt.proofSets[7][5] = [][32]byte{
-		leafSum(mt.data[5]),
+		LeafSum(mt.data[5]),
 		mt.leaves[4],
 		mt.leaves[6],
 		mt.roots[4],
@@ -182,7 +182,7 @@ func CreateMerkleTester(t *testing.T) (mt *MerkleTester) {
 
 	mt.proofSets[15] = make(map[int][][32]byte)
 	mt.proofSets[15][3] = [][32]byte{
-		leafSum(mt.data[3]),
+		LeafSum(mt.data[3]),
 		mt.leaves[2],
 		mt.roots[2],
 		mt.join(
@@ -202,7 +202,7 @@ func CreateMerkleTester(t *testing.T) (mt *MerkleTester) {
 	}
 
 	mt.proofSets[15][10] = [][32]byte{
-		leafSum(mt.data[10]),
+		LeafSum(mt.data[10]),
 		mt.leaves[11],
 		mt.join(
 			mt.leaves[8],
@@ -216,7 +216,7 @@ func CreateMerkleTester(t *testing.T) (mt *MerkleTester) {
 	}
 
 	mt.proofSets[15][13] = [][32]byte{
-		leafSum(mt.data[13]),
+		LeafSum(mt.data[13]),
 		mt.leaves[12],
 		mt.leaves[14],
 		mt.join(
@@ -510,10 +510,10 @@ func TestPushSubTreeCorrectRoot(t *testing.T) {
 	// Create 4 height 0 subtrees and combine them. The root should be the
 	// same.
 	tree2 := New()
-	leaf1Hash := leafSum(leaf1Data)
-	leaf2Hash := leafSum(leaf2Data)
-	leaf3Hash := leafSum(leaf3Data)
-	leaf4Hash := leafSum(leaf4Data)
+	leaf1Hash := LeafSum(leaf1Data)
+	leaf2Hash := LeafSum(leaf2Data)
+	leaf3Hash := LeafSum(leaf3Data)
+	leaf4Hash := LeafSum(leaf4Data)
 	err1 := tree2.PushSubTree(0, leaf1Hash)
 	err2 := tree2.PushSubTree(0, leaf2Hash)
 	err3 := tree2.PushSubTree(0, leaf3Hash)
@@ -624,8 +624,8 @@ func TestPushSubTreeCorrectRootWithProof(t *testing.T) {
 	// Create 1 height 1 tree and add 2 leaves. The root should be the same.
 	tree2 := New()
 	proofIndex = uint64(2 + fastrand.Intn(2))
-	leaf1Hash := leafSum(leaf1Data)
-	leaf2Hash := leafSum(leaf2Data)
+	leaf1Hash := LeafSum(leaf1Data)
+	leaf2Hash := LeafSum(leaf2Data)
 	node12Hash := nodeSum(leaf1Hash, leaf2Hash)
 	if err := tree2.SetIndex(proofIndex); err != nil {
 		t.Fatal(err)
@@ -642,8 +642,8 @@ func TestPushSubTreeCorrectRootWithProof(t *testing.T) {
 	// Create 2 leaves and add 1 height 1 tree. The root should be the same.
 	tree3 := New()
 	proofIndex = uint64(fastrand.Intn(2))
-	leaf3Hash := leafSum(leaf3Data)
-	leaf4Hash := leafSum(leaf4Data)
+	leaf3Hash := LeafSum(leaf3Data)
+	leaf4Hash := LeafSum(leaf4Data)
 	if err := tree3.SetIndex(proofIndex); err != nil {
 		t.Fatal(err)
 	}

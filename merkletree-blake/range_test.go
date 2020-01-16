@@ -340,7 +340,7 @@ func TestBuildVerifyMultiRangeProof(t *testing.T) {
 	leafData := make([]byte, 1<<22)
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = LeafSum(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, leafSize)
 
@@ -518,7 +518,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	numLeaves := len(leafData) / 64
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = LeafSum(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, leafSize)
 
@@ -559,7 +559,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	}
 
 	proof = buildProof(0, 1)
-	checkRoot := leafSum(leafData[:leafSize])
+	checkRoot := LeafSum(leafData[:leafSize])
 	for i := range proof {
 		checkRoot = nodeSum(checkRoot, proof[i])
 	}
@@ -570,7 +570,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	}
 
 	proof = buildProof(numLeaves-1, numLeaves)
-	checkRoot = leafSum(leafData[len(leafData)-leafSize:])
+	checkRoot = LeafSum(leafData[len(leafData)-leafSize:])
 	for i := range proof {
 		checkRoot = nodeSum(proof[len(proof)-i-1], checkRoot)
 	}
@@ -581,7 +581,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	}
 
 	proof = buildProof(10, 11)
-	checkRoot = leafSum(leafData[10*leafSize:][:leafSize])
+	checkRoot = LeafSum(leafData[10*leafSize:][:leafSize])
 	checkRoot = nodeSum(checkRoot, proof[2])
 	checkRoot = nodeSum(proof[1], checkRoot)
 	checkRoot = nodeSum(checkRoot, proof[3])
@@ -598,11 +598,11 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 	// this is the largest possible proof
 	midl, midr := numLeaves/2-1, numLeaves/2+1
 	proof = buildProof(midl, midr)
-	left := leafSum(leafData[midl*leafSize:][:leafSize])
+	left := LeafSum(leafData[midl*leafSize:][:leafSize])
 	for i := 0; i < len(proof)/2; i++ {
 		left = nodeSum(proof[len(proof)/2-i-1], left)
 	}
-	right := leafSum(leafData[(midr-1)*leafSize:][:leafSize])
+	right := LeafSum(leafData[(midr-1)*leafSize:][:leafSize])
 	for i := len(proof) / 2; i < len(proof); i++ {
 		right = nodeSum(right, proof[i])
 	}
@@ -742,7 +742,7 @@ func TestBuildProofRangeEOF(t *testing.T) {
 	numLeaves := len(leafData) / 64
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = LeafSum(leafData[i*leafSize:][:leafSize])
 	}
 
 	// build a proof for the middle of the tree, but only supply half of the
@@ -954,7 +954,7 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 	leafData := make([]byte, 1<<22)
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = LeafSum(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, leafSize)
 
@@ -1154,7 +1154,7 @@ func TestProofOfModification(t *testing.T) {
 	leafData := fastrand.Bytes(dataSize)
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = LeafSum(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, leafSize)
 
@@ -1245,7 +1245,7 @@ func TestProofOfModificationAppend(t *testing.T) {
 	leafData := fastrand.Bytes(dataSize)
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = LeafSum(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, leafSize)
 
@@ -1319,7 +1319,7 @@ func TestProofOfModificationTrim(t *testing.T) {
 	leafData := fastrand.Bytes(dataSize)
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = LeafSum(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, leafSize)
 
@@ -1386,7 +1386,7 @@ func TestProofOfModificationUpdate(t *testing.T) {
 	leafData := fastrand.Bytes(dataSize)
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = LeafSum(leafData[i*leafSize:][:leafSize])
 	}
 	nodeSumes := make([][32]byte, numLeaves/leavesPerNode)
 	for i := range nodeSumes {
@@ -1590,7 +1590,7 @@ func TestBuildVerifyMixedDiffProof(t *testing.T) {
 	// Compute the leaves' hashes.
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = LeafSum(leafData[i*leafSize:][:leafSize])
 	}
 	buildProof := func(ranges []LeafRange) [][32]byte {
 		var nhs [][32]byte
@@ -1707,7 +1707,7 @@ func TestBuildVerifyMixedDiffProofManual(t *testing.T) {
 	// Compute the leaves' hashes.
 	leafHashes := make([][32]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(leaves[i])
+		leafHashes[i] = LeafSum(leaves[i])
 	}
 
 	// Build the proof manually.

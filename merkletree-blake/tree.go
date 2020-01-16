@@ -47,10 +47,10 @@ type subTree struct {
 	sum    [32]byte
 }
 
-// leafSum returns the hash created from data inserted to form a leaf. Leaf
+// LeafSum returns the hash created from data inserted to form a leaf. Leaf
 // sums are calculated using:
 //		Hash(0x00 || data)
-func leafSum(data []byte) [32]byte {
+func LeafSum(data []byte) [32]byte {
 	buf := make([]byte, 0, 65)
 	buf = append(buf, leafHashPrefix...)
 	buf = append(buf, data...)
@@ -173,16 +173,16 @@ func (t *Tree) Push(data []byte) {
 	// data is being inserted at the proof index, it is added to the proof set.
 	if t.currentIndex == t.proofIndex {
 		t.proofBase = data
-		t.proofSet = append(t.proofSet, leafSum(data))
+		t.proofSet = append(t.proofSet, LeafSum(data))
 	}
 
 	// Hash the data to create a subtree of height 0. The sum of the new node
 	// is going to be the data for cached trees, and is going to be the result
-	// of calling leafSum() on the data for standard trees. Doing a check here
+	// of calling LeafSum() on the data for standard trees. Doing a check here
 	// prevents needing to duplicate the entire 'Push' function for the trees.
 	t.stack = append(t.stack, subTree{
 		height: 0,
-		sum:    leafSum(data),
+		sum:    LeafSum(data),
 	})
 
 	// Join subTrees if possible.

@@ -44,7 +44,7 @@ func VerifyProof(merkleRoot [32]byte, proofSet [][32]byte, proofIndex uint64, nu
 	// needs to be made that the element exists.
 
 	// The first element of the set is the original data. A sibling at height 1
-	// is created by getting the leafSum of the original data.
+	// is created by getting the LeafSum of the original data.
 	height := 0
 	if len(proofSet) <= height {
 		return false

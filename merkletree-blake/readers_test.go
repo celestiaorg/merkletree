@@ -88,7 +88,7 @@ func TestBuildReaderProofPadding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectedRoot := leafSum(bytes1)
+	expectedRoot := LeafSum(bytes1)
 	if root != expectedRoot {
 		t.Error("ReaderRoot returned the wrong root")
 	}

@@ -318,7 +318,7 @@ func (rlh *ReaderLeafHasher) NextLeafHash() ([32]byte, error) {
 	} else if n == 0 {
 		return [32]byte{}, io.EOF
 	}
-	return leafSum(rlh.leaf[:n]), nil
+	return LeafSum(rlh.leaf[:n]), nil
 }
 
 // NewReaderLeafHasher creates a ReaderLeafHasher with the specified stream
