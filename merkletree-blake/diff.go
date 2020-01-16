@@ -12,9 +12,6 @@ func BuildDiffProof(ranges []LeafRange, h SubtreeHasher, numLeaves uint64) (proo
 	// it ends by consuming until numLeaves instead of math.MaxUint64. This can
 	// result in a larger proof, but the extra proof hashes are required for
 	// certain diffs.
-	if len(ranges) == 0 {
-		return nil, nil
-	}
 	if !validRangeSet(ranges) {
 		panic("BuildDiffProof: illegal set of proof ranges")
 	}
@@ -55,9 +52,6 @@ func BuildDiffProof(ranges []LeafRange, h SubtreeHasher, numLeaves uint64) (proo
 // the leaf hashes into subtrees where possible. These compressed leaf hashes
 // can be used as the 'rangeHashes' input to VerifyDiffProof.
 func CompressLeafHashes(ranges []LeafRange, h SubtreeHasher) (compressed [][32]byte, err error) {
-	if len(ranges) == 0 {
-		return nil, nil
-	}
 	if !validRangeSet(ranges) {
 		panic("BuildDiffProof: illegal set of proof ranges")
 	}
@@ -79,9 +73,6 @@ func CompressLeafHashes(ranges []LeafRange, h SubtreeHasher) (compressed [][32]b
 // hashes produced by sh, which must contain the concatenation of the subtree
 // hashes within the proof ranges.
 func VerifyDiffProof(rangeHashes [][32]byte, numLeaves uint64, ranges []LeafRange, proof [][32]byte, root [32]byte) (bool, error) {
-	if len(ranges) == 0 {
-		return len(proof) == 0, nil
-	}
 	if !validRangeSet(ranges) {
 		panic("VerifyDiffProof: illegal set of proof ranges")
 	}

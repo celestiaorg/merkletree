@@ -181,9 +181,6 @@ func (msh *MixedSubtreeHasher) NextSubtreeRoot(subtreeSize int) ([32]byte, error
 // BuildMultiRangeProof constructs a proof for the specified leaf ranges, using
 // the provided SubtreeHasher. The ranges must be sorted and non-overlapping.
 func BuildMultiRangeProof(ranges []LeafRange, h SubtreeHasher) (proof [][32]byte, err error) {
-	if len(ranges) == 0 {
-		return nil, nil
-	}
 	if !validRangeSet(ranges) {
 		panic("BuildMultiRangeProof: illegal set of proof ranges")
 	}
@@ -358,11 +355,8 @@ func NewCachedLeafHasher(leafHashes [][32]byte) *CachedLeafHasher {
 // using leaf hashes produced by lh, which must contain the concatenation of
 // the leaf hashes within the proof ranges.
 func VerifyMultiRangeProof(lh LeafHasher, ranges []LeafRange, proof [][32]byte, root [32]byte) (bool, error) {
-	if len(ranges) == 0 {
-		return len(proof) == 0, nil
-	}
 	if !validRangeSet(ranges) {
-		panic("BuildMultiRangeProof: illegal set of proof ranges")
+		panic("VerifyMultiRangeProof: illegal set of proof ranges")
 	}
 
 	// manually build a tree using the proof hashes
