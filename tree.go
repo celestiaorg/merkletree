@@ -84,6 +84,14 @@ func New(h hash.Hash) *Tree {
 	}
 }
 
+// NewFromTreehasher creates a new Tree. The provided TreeHasher will be used for all hashing
+// operations within the Tree.
+func NewFromTreehasher(th TreeHasher) *Tree {
+	return &Tree{
+		treeHasher: th,
+	}
+}
+
 // Prove creates a proof that the leaf at the established index (established by
 // SetIndex) is an element of the Merkle tree. Prove will return a nil proof
 // set if used incorrectly. Prove does not modify the Tree. Prove can only be

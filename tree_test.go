@@ -238,7 +238,7 @@ func TestBuildRoot(t *testing.T) {
 	var tree *Tree
 	for i, root := range mt.roots {
 		// Fill out the tree.
-		tree = New(sha256.New())
+		tree = NewFromTreehasher(NewDefaultHasher(sha256.New()))
 		for j := 0; j < i; j++ {
 			tree.Push(mt.data[j])
 		}
