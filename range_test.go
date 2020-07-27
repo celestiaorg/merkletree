@@ -342,16 +342,17 @@ func TestBuildVerifyMultiRangeProof(t *testing.T) {
 	const leafSize = 64
 	const numLeaves = dataSize / leafSize
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := make([]byte, 1<<22)
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = th.HashLeaf(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, blake, leafSize)
 
 	// convenience functions
 	nodeHash := func(left, right []byte) []byte {
-		return nodeSum(blake, left, right)
+		return th.HashChildren(left, right)
 	}
 	buildProof := func(ranges []LeafRange) [][]byte {
 		// flip a coin to decide whether to use leaf data or leaf hashes
@@ -522,21 +523,22 @@ func TestBuildVerifyMultiRangeProof(t *testing.T) {
 func TestBuildVerifyRangeProof(t *testing.T) {
 	// setup proof parameters
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := make([]byte, 1<<22)
 	const leafSize = 64
 	numLeaves := len(leafData) / 64
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = th.HashLeaf(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, blake, leafSize)
 
 	// convenience functions
 	leafHash := func(leaf []byte) []byte {
-		return leafSum(blake, leaf)
+		return th.HashLeaf(leaf)
 	}
 	nodeHash := func(left, right []byte) []byte {
-		return nodeSum(blake, left, right)
+		return th.HashChildren(left, right)
 	}
 	buildProof := func(start, end int) [][]byte {
 		// flip a coin to decide whether to use leaf data or leaf hashes
@@ -753,12 +755,13 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 func TestBuildProofRangeEOF(t *testing.T) {
 	// setup proof parameters
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := make([]byte, 1<<22)
 	const leafSize = 64
 	numLeaves := len(leafData) / 64
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = th.HashLeaf(leafData[i*leafSize:][:leafSize])
 	}
 
 	// build a proof for the middle of the tree, but only supply half of the
@@ -970,16 +973,17 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 	const leafSize = 64
 	const numLeaves = dataSize / leafSize
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := make([]byte, 1<<22)
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = th.HashLeaf(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, blake, leafSize)
 
 	// convenience functions
 	nodeHash := func(left, right []byte) []byte {
-		return nodeSum(blake, left, right)
+		return th.HashChildren(left, right)
 	}
 	buildProof := func(ranges []LeafRange) [][]byte {
 		// flip a coin to decide whether to use leaf data or leaf hashes
@@ -1173,10 +1177,11 @@ func TestProofOfModification(t *testing.T) {
 	const numLeaves = 12
 	const dataSize = leafSize * numLeaves
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := fastrand.Bytes(dataSize)
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = th.HashLeaf(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, blake, leafSize)
 
@@ -1264,10 +1269,11 @@ func TestProofOfModificationAppend(t *testing.T) {
 	const numLeaves = 15
 	const dataSize = leafSize * numLeaves
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := fastrand.Bytes(dataSize)
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = th.HashLeaf(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, blake, leafSize)
 
@@ -1338,10 +1344,11 @@ func TestProofOfModificationTrim(t *testing.T) {
 	const numLeaves = 15
 	const dataSize = leafSize * numLeaves
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := fastrand.Bytes(dataSize)
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = th.HashLeaf(leafData[i*leafSize:][:leafSize])
 	}
 	root := bytesRoot(leafData, blake, leafSize)
 
@@ -1406,10 +1413,11 @@ func TestProofOfModificationUpdate(t *testing.T) {
 	const leavesPerNode = 4
 	const dataSize = leafSize * numLeaves
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := fastrand.Bytes(dataSize)
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = th.HashLeaf(leafData[i*leafSize:][:leafSize])
 	}
 	nodeHashes := make([][]byte, numLeaves/leavesPerNode)
 	for i := range nodeHashes {
@@ -1593,6 +1601,7 @@ func TestBuildVerifyMixedDiffProof(t *testing.T) {
 	const numLeaves = dataSize / leafSize
 	const leavesPerSector = numLeaves / numSectors
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := make([]byte, dataSize)
 	// Compute the root.
 	root := bytesRoot(leafData, blake, leafSize)
@@ -1604,7 +1613,7 @@ func TestBuildVerifyMixedDiffProof(t *testing.T) {
 	}
 	// Sanity check that sectorRoots sum up to root.
 	nodeHash := func(left, right []byte) []byte {
-		return nodeSum(blake, left, right)
+		return th.HashChildren(left, right)
 	}
 	root2 := nodeHash(nodeHash(sectorRoots[0], sectorRoots[1]), nodeHash(sectorRoots[2], sectorRoots[3]))
 	if !bytes.Equal(root, root2) {
@@ -1619,7 +1628,7 @@ func TestBuildVerifyMixedDiffProof(t *testing.T) {
 	// Compute the leaves' hashes.
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leafData[i*leafSize:][:leafSize])
+		leafHashes[i] = th.HashLeaf(leafData[i*leafSize:][:leafSize])
 	}
 	buildProof := func(ranges []LeafRange) [][]byte {
 		var nhs [][]byte
@@ -1714,6 +1723,7 @@ func TestBuildVerifyMixedDiffProofManual(t *testing.T) {
 	const leafSize = 64
 	const dataSize = numLeaves * leafSize
 	blake, _ := blake2b.New256(nil)
+	th := NewDefaultHasher(blake)
 	leafData := fastrand.Bytes(dataSize)
 	// Compute the root.
 	root := bytesRoot(leafData, blake, leafSize)
@@ -1724,7 +1734,7 @@ func TestBuildVerifyMixedDiffProofManual(t *testing.T) {
 	}
 	// Sanity check that nodeHashes sum up to root.
 	nodeHash := func(left, right []byte) []byte {
-		return nodeSum(blake, left, right)
+		return th.HashChildren(left, right)
 	}
 	root2 := nodeHash(nodeHash(nodeHashes[0], nodeHashes[1]), nodeHash(nodeHashes[2], nodeHashes[3]))
 	if !bytes.Equal(root, root2) {
@@ -1739,7 +1749,7 @@ func TestBuildVerifyMixedDiffProofManual(t *testing.T) {
 	// Compute the leaves' hashes.
 	leafHashes := make([][]byte, numLeaves)
 	for i := range leafHashes {
-		leafHashes[i] = leafSum(blake, leaves[i])
+		leafHashes[i] = th.HashLeaf(leaves[i])
 	}
 
 	// Build the proof manually.

@@ -311,7 +311,7 @@ type LeafHasher interface {
 // from the underlying stream.
 type ReaderLeafHasher struct {
 	r    io.Reader
-	h    hash.Hash
+	lh   LeafHasherz
 	leaf []byte
 }
 
@@ -323,7 +323,7 @@ func (rlh *ReaderLeafHasher) NextLeafHash() ([]byte, error) {
 	} else if n == 0 {
 		return nil, io.EOF
 	}
-	return leafSum(rlh.h, rlh.leaf[:n]), nil
+	return rlh.lh.HashLeaf(rlh.leaf[:n]), nil
 }
 
 // NewReaderLeafHasher creates a ReaderLeafHasher with the specified stream,
@@ -331,7 +331,7 @@ func (rlh *ReaderLeafHasher) NextLeafHash() ([]byte, error) {
 func NewReaderLeafHasher(r io.Reader, h hash.Hash, leafSize int) *ReaderLeafHasher {
 	return &ReaderLeafHasher{
 		r:    r,
-		h:    h,
+		lh:   NewDefaultHasher(h),
 		leaf: make([]byte, leafSize),
 	}
 }

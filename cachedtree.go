@@ -22,7 +22,7 @@ func NewCachedTree(h hash.Hash, cachedNodeHeight uint64) *CachedTree {
 		cachedNodeHeight: cachedNodeHeight,
 
 		Tree: Tree{
-			hash: h,
+			treeHasher: NewDefaultHasher(h),
 
 			cachedTree: true,
 		},

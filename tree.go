@@ -19,8 +19,8 @@ type Tree struct {
 	// tree. When a new leaf is inserted, it is inserted as a subtree of height
 	// 0. If there is another subtree of the same height, both can be removed,
 	// combined, and then inserted as a subtree of height n + 1.
-	head *subTree
-	hash hash.Hash
+	head       *subTree
+	treeHasher TreeHasher
 
 	// Helper variables used to construct proofs that the data at 'proofIndex'
 	// is in the Merkle tree. The proofSet is constructed as elements are being
@@ -58,22 +58,8 @@ func sum(h hash.Hash, data ...[]byte) []byte {
 	return h.Sum(nil)
 }
 
-// leafSum returns the hash created from data inserted to form a leaf. Leaf
-// sums are calculated using:
-//		Hash(0x00 || data)
-func leafSum(h hash.Hash, data []byte) []byte {
-	return sum(h, leafHashPrefix, data)
-}
-
-// nodeSum returns the hash created from two sibling nodes being combined into
-// a parent node. Node sums are calculated using:
-//		Hash(0x01 || left sibling sum || right sibling sum)
-func nodeSum(h hash.Hash, a, b []byte) []byte {
-	return sum(h, nodeHashPrefix, a, b)
-}
-
 // joinSubTrees combines two equal sized subTrees into a larger subTree.
-func joinSubTrees(h hash.Hash, a, b *subTree) *subTree {
+func joinSubTrees(th TreeHasher, a, b *subTree) *subTree {
 	if DEBUG {
 		if b.next != a {
 			panic("invalid subtree join - 'a' is not paired with 'b'")
@@ -86,7 +72,7 @@ func joinSubTrees(h hash.Hash, a, b *subTree) *subTree {
 	return &subTree{
 		next:   a.next,
 		height: a.height + 1,
-		sum:    nodeSum(h, a.sum, b.sum),
+		sum:    th.HashChildren(a.sum, b.sum),
 	}
 }
 
@@ -94,7 +80,7 @@ func joinSubTrees(h hash.Hash, a, b *subTree) *subTree {
 // operations within the Tree.
 func New(h hash.Hash) *Tree {
 	return &Tree{
-		hash: h,
+		treeHasher: NewDefaultHasher(h),
 	}
 }
 
@@ -132,7 +118,7 @@ func (t *Tree) Prove() (merkleRoot []byte, proofSet [][]byte, proofIndex uint64,
 	// set.
 	current := t.head
 	for current.next != nil && current.next.height < len(proofSet)-1 {
-		current = joinSubTrees(t.hash, current.next, current)
+		current = joinSubTrees(t.treeHasher, current.next, current)
 	}
 
 	// Sanity check - check that either 'current' or 'current.next' is the
@@ -189,7 +175,7 @@ func (t *Tree) Push(data []byte) {
 	if t.cachedTree {
 		t.head.sum = data
 	} else {
-		t.head.sum = leafSum(t.hash, data)
+		t.head.sum = t.treeHasher.HashLeaf(data)
 	}
 
 	// Join subTrees if possible.
@@ -275,7 +261,7 @@ func (t *Tree) Root() []byte {
 	// the join.
 	current := t.head
 	for current.next != nil {
-		current = joinSubTrees(t.hash, current.next, current)
+		current = joinSubTrees(t.treeHasher, current.next, current)
 	}
 	// Return a copy to prevent leaking a pointer to internal data.
 	return append(current.sum[:0:0], current.sum...)
@@ -328,6 +314,6 @@ func (t *Tree) joinAllSubTrees() {
 
 		// Join the two subTrees into one subTree with a greater height. Then
 		// compare the new subTree to the next subTree.
-		t.head = joinSubTrees(t.hash, t.head.next, t.head)
+		t.head = joinSubTrees(t.treeHasher, t.head.next, t.head)
 	}
 }

@@ -10,6 +10,7 @@ import (
 // root. False is returned if the proof set or Merkle root is nil, and if
 // 'numLeaves' equals 0.
 func VerifyProof(h hash.Hash, merkleRoot []byte, proofSet [][]byte, proofIndex uint64, numLeaves uint64) bool {
+	th := NewDefaultHasher(h)
 	// Return false for nonsense input. A switch statement is used so that the
 	// cover tool will reveal if a case is not covered by the test suite. This
 	// would not be possible using a single if statement due to the limitations
@@ -57,7 +58,7 @@ func VerifyProof(h hash.Hash, merkleRoot []byte, proofSet [][]byte, proofIndex u
 	if len(proofSet) <= height {
 		return false
 	}
-	sum := leafSum(h, proofSet[height])
+	sum := th.HashLeaf(proofSet[height])
 	height++
 
 	// While the current subtree (of height 'height') is complete, determine
@@ -88,9 +89,9 @@ func VerifyProof(h hash.Hash, merkleRoot []byte, proofSet [][]byte, proofIndex u
 			return false
 		}
 		if proofIndex-subTreeStartIndex < 1<<uint(height-1) {
-			sum = nodeSum(h, sum, proofSet[height])
+			sum = th.HashChildren(sum, proofSet[height])
 		} else {
-			sum = nodeSum(h, proofSet[height], sum)
+			sum = th.HashChildren(proofSet[height], sum)
 		}
 		height++
 	}
@@ -102,13 +103,13 @@ func VerifyProof(h hash.Hash, merkleRoot []byte, proofSet [][]byte, proofIndex u
 		if len(proofSet) <= height {
 			return false
 		}
-		sum = nodeSum(h, sum, proofSet[height])
+		sum = th.HashChildren(sum, proofSet[height])
 		height++
 	}
 
 	// All remaining elements in the proof set will belong to a left sibling.
 	for height < len(proofSet) {
-		sum = nodeSum(h, proofSet[height], sum)
+		sum = th.HashChildren(proofSet[height], sum)
 		height++
 	}
 
