@@ -1,15 +1,8 @@
 language: go
 
 go:
-  - 1.7
+  - 1.14
 
-install:
-  - go get -u github.com/kisielk/errcheck
-  - go get -u gitlab.com/NebulousLabs/fastrand
-  - go get -u gitlab.com/NebulousLabs/errors
-  - go get -u golang.org/x/tools/cmd/cover
-  - test -z "$(go fmt)"
-
-script: errcheck && go vet && go test -v -tags=debug -bench=. && go test -covermode=atomic && go install
+script: make test
 
 sudo: false
