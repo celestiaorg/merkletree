@@ -530,8 +530,8 @@ func TestPushSubTreeCorrectRoot(t *testing.T) {
 	// Create 2 height 1 subtrees and combine them. The root should be the
 	// same.
 	tree3 := New(hash)
-	node12Hash := th.HashChildren(leaf1Hash, leaf2Hash)
-	node34Hash := th.HashChildren(leaf3Hash, leaf4Hash)
+	node12Hash := th.HashNode(leaf1Hash, leaf2Hash)
+	node34Hash := th.HashNode(leaf3Hash, leaf4Hash)
 	err1 = tree3.PushSubTree(1, node12Hash)
 	err2 = tree3.PushSubTree(1, node34Hash)
 	if err := errors.Compose(err1, err2); err != nil {
@@ -544,7 +544,7 @@ func TestPushSubTreeCorrectRoot(t *testing.T) {
 	// Create 1 height 2 subtree and add it to the tree. The root should be the
 	// same.
 	tree4 := New(hash)
-	node1234Hash := th.HashChildren(node12Hash, node34Hash)
+	node1234Hash := th.HashNode(node12Hash, node34Hash)
 	if err := tree4.PushSubTree(2, node1234Hash); err != nil {
 		t.Fatal(err)
 	}
@@ -631,7 +631,7 @@ func TestPushSubTreeCorrectRootWithProof(t *testing.T) {
 	proofIndex = uint64(2 + fastrand.Intn(2))
 	leaf1Hash := th.HashLeaf(leaf1Data)
 	leaf2Hash := th.HashLeaf(leaf2Data)
-	node12Hash := th.HashChildren(leaf1Hash, leaf2Hash)
+	node12Hash := th.HashNode(leaf1Hash, leaf2Hash)
 	if err := tree2.SetIndex(proofIndex); err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +652,7 @@ func TestPushSubTreeCorrectRootWithProof(t *testing.T) {
 	if err := tree3.SetIndex(proofIndex); err != nil {
 		t.Fatal(err)
 	}
-	node34Hash := th.HashChildren(leaf3Hash, leaf4Hash)
+	node34Hash := th.HashNode(leaf3Hash, leaf4Hash)
 	tree3.Push(leaf1Data)
 	tree3.Push(leaf2Data)
 	if err := tree3.PushSubTree(1, node34Hash); err != nil {

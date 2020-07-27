@@ -6,7 +6,7 @@ type LeafHasherz interface {
 	HashLeaf(leaf []byte) []byte
 }
 type NodeHasher interface {
-	HashChildren(l, r []byte) []byte
+	HashNode(l, r []byte) []byte
 }
 type TreeHasher interface {
 	LeafHasherz
@@ -27,6 +27,6 @@ func (d *DefaultTreeHasher) HashLeaf(leaf []byte) []byte {
 	return sum(d.h, leafHashPrefix, leaf)
 }
 
-func (d *DefaultTreeHasher) HashChildren(l, r []byte) []byte {
+func (d *DefaultTreeHasher) HashNode(l, r []byte) []byte {
 	return sum(d.h, nodeHashPrefix, l, r)
 }

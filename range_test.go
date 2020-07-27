@@ -352,7 +352,7 @@ func TestBuildVerifyMultiRangeProof(t *testing.T) {
 
 	// convenience functions
 	nodeHash := func(left, right []byte) []byte {
-		return th.HashChildren(left, right)
+		return th.HashNode(left, right)
 	}
 	buildProof := func(ranges []LeafRange) [][]byte {
 		// flip a coin to decide whether to use leaf data or leaf hashes
@@ -538,7 +538,7 @@ func TestBuildVerifyRangeProof(t *testing.T) {
 		return th.HashLeaf(leaf)
 	}
 	nodeHash := func(left, right []byte) []byte {
-		return th.HashChildren(left, right)
+		return th.HashNode(left, right)
 	}
 	buildProof := func(start, end int) [][]byte {
 		// flip a coin to decide whether to use leaf data or leaf hashes
@@ -983,7 +983,7 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 
 	// convenience functions
 	nodeHash := func(left, right []byte) []byte {
-		return th.HashChildren(left, right)
+		return th.HashNode(left, right)
 	}
 	buildProof := func(ranges []LeafRange) [][]byte {
 		// flip a coin to decide whether to use leaf data or leaf hashes
@@ -1613,7 +1613,7 @@ func TestBuildVerifyMixedDiffProof(t *testing.T) {
 	}
 	// Sanity check that sectorRoots sum up to root.
 	nodeHash := func(left, right []byte) []byte {
-		return th.HashChildren(left, right)
+		return th.HashNode(left, right)
 	}
 	root2 := nodeHash(nodeHash(sectorRoots[0], sectorRoots[1]), nodeHash(sectorRoots[2], sectorRoots[3]))
 	if !bytes.Equal(root, root2) {
@@ -1734,7 +1734,7 @@ func TestBuildVerifyMixedDiffProofManual(t *testing.T) {
 	}
 	// Sanity check that nodeHashes sum up to root.
 	nodeHash := func(left, right []byte) []byte {
-		return th.HashChildren(left, right)
+		return th.HashNode(left, right)
 	}
 	root2 := nodeHash(nodeHash(nodeHashes[0], nodeHashes[1]), nodeHash(nodeHashes[2], nodeHashes[3]))
 	if !bytes.Equal(root, root2) {

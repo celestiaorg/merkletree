@@ -72,7 +72,7 @@ func joinSubTrees(th TreeHasher, a, b *subTree) *subTree {
 	return &subTree{
 		next:   a.next,
 		height: a.height + 1,
-		sum:    th.HashChildren(a.sum, b.sum),
+		sum:    th.HashNode(a.sum, b.sum),
 	}
 }
 

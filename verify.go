@@ -89,9 +89,9 @@ func VerifyProof(h hash.Hash, merkleRoot []byte, proofSet [][]byte, proofIndex u
 			return false
 		}
 		if proofIndex-subTreeStartIndex < 1<<uint(height-1) {
-			sum = th.HashChildren(sum, proofSet[height])
+			sum = th.HashNode(sum, proofSet[height])
 		} else {
-			sum = th.HashChildren(proofSet[height], sum)
+			sum = th.HashNode(proofSet[height], sum)
 		}
 		height++
 	}
@@ -103,13 +103,13 @@ func VerifyProof(h hash.Hash, merkleRoot []byte, proofSet [][]byte, proofIndex u
 		if len(proofSet) <= height {
 			return false
 		}
-		sum = th.HashChildren(sum, proofSet[height])
+		sum = th.HashNode(sum, proofSet[height])
 		height++
 	}
 
 	// All remaining elements in the proof set will belong to a left sibling.
 	for height < len(proofSet) {
-		sum = th.HashChildren(proofSet[height], sum)
+		sum = th.HashNode(proofSet[height], sum)
 		height++
 	}
 
