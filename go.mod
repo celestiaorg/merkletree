@@ -1,4 +1,4 @@
-module github.com/liamsi/merkletree
+module github.com/lazyledger/merkletree
 
 go 1.13
 
